@@ -20,47 +20,55 @@ function isUrl(s: string): boolean {
 }
 
 /**
- * Resolve a product URL to a product name.
- * Follows redirects, extracts the product name from the page title.
+ * Resolve a product URL to a product name using Perplexity (which can actually browse).
+ * Scraping Amazon/Flipkart directly is unreliable (compression, CAPTCHAs, bot blocking).
  */
 async function resolveProductUrl(url: string): Promise<string> {
   // Ensure protocol
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
 
-  // Follow redirects to get the real URL + page content
-  const resp = await fetch(url, {
-    redirect: "follow",
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; Savvit/1.0)" },
+  const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY || "";
+
+  const response = await fetch("https://api.perplexity.ai/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "sonar",
+      messages: [
+        {
+          role: "system",
+          content: `You are a product identifier. Given a product URL, return ONLY the exact product name with key specs (brand, model, storage/size/color if relevant). Nothing else — no explanation, no markdown, no quotes. Just the product name.
+
+Examples:
+- "Apple iPhone 16 Pro 256GB Black Titanium"
+- "Sony WH-1000XM5 Wireless Noise Cancelling Headphones Black"
+- "Philips HD2582/90 830W 2-Slice Pop-Up Toaster"`,
+        },
+        {
+          role: "user",
+          content: `What product is this? ${url}`,
+        },
+      ],
+      temperature: 0.1,
+    }),
   });
-  const finalUrl = resp.url;
-  const html = await resp.text();
 
-  // Extract title
-  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-  let title = titleMatch?.[1]?.trim() || "";
-
-  // Clean common suffixes
-  title = title
-    .replace(/\s*[-:|]\s*(Amazon\.in|Amazon|Flipkart|Croma|Buy Online).*$/i, "")
-    .replace(/\s*:\s*Buy .+$/i, "")
-    .replace(/Online at Best Price.*$/i, "")
-    .trim();
-
-  // If we got a reasonable product name from title, use it
-  if (title && title.length > 3 && title.length < 200) {
-    console.log(`[URL resolve] ${url} → "${title}"`);
-    return title;
+  if (!response.ok) {
+    throw new Error(`Could not identify product from URL (API ${response.status})`);
   }
 
-  // Fallback: try to extract from Amazon URL path
-  const amazonMatch = finalUrl.match(/\/([^/]+)\/dp\//);
-  if (amazonMatch) {
-    const slug = amazonMatch[1].replace(/-/g, " ");
-    console.log(`[URL resolve] ${url} → slug: "${slug}"`);
-    return slug;
+  const data = await response.json();
+  const productName = data.choices?.[0]?.message?.content?.trim();
+
+  if (!productName || productName.length < 3 || productName.length > 200) {
+    throw new Error("Could not determine product name from URL. Please enter the product name instead.");
   }
 
-  throw new Error("Could not determine product name from URL. Please enter the product name instead.");
+  console.log(`[URL resolve] ${url} → "${productName}"`);
+  return productName;
 }
 
 /**
