@@ -134,25 +134,25 @@ class SearchViewModel {
         let finalURL = response.url ?? url
         let finalURLString = finalURL.absoluteString
 
-        // Try to extract product name from known URL patterns
+        // Try to extract product name from known URL slug patterns
         if let name = extractFromAmazonURL(finalURL) ?? extractFromFlipkartURL(finalURL) ?? extractFromCromaURL(finalURL) {
             return name
         }
 
-        // Fallback: try to get page title
+        // Try to get page title (works well on phone — not blocked like servers)
         if let title = try? await fetchPageTitle(url: finalURL, session: session) {
             return title
         }
 
-        // Last resort: use the URL path
-        let pathSlug = finalURL.pathComponents
-            .filter { $0 != "/" && $0.count > 3 && !$0.starts(with: "ref=") }
-            .first?
-            .replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: "_", with: " ")
+        // Amazon fallback: if we have an ASIN, search with it directly
+        // Perplexity knows what every ASIN is
+        if let asin = extractASIN(from: finalURL) {
+            return "Amazon ASIN \(asin)"
+        }
 
-        if let slug = pathSlug, slug.count > 3 {
-            return slug
+        // Flipkart fallback: extract item ID
+        if let fkItem = extractFlipkartItemID(from: finalURL) {
+            return "Flipkart item \(fkItem)"
         }
 
         throw NSError(domain: "Savvit", code: 0, userInfo: [NSLocalizedDescriptionKey: "Could not identify product"])
@@ -160,12 +160,50 @@ class SearchViewModel {
 
     private func extractFromAmazonURL(_ url: URL) -> String? {
         let components = url.pathComponents
-        // Pattern: /Product-Name/dp/ASIN
+        // Pattern: /Product-Name/dp/ASIN — need slug BEFORE /dp/
         if let dpIndex = components.firstIndex(of: "dp"), dpIndex > 1 {
             let slug = components[dpIndex - 1]
                 .replacingOccurrences(of: "-", with: " ")
                 .trimmingCharacters(in: .whitespaces)
-            if slug.count > 3 && slug != "/" { return slug }
+            // Make sure slug is a real product name, not just "/" or a short fragment
+            if slug.count > 5 && slug != "/" && !slug.contains("amazon") {
+                return slug
+            }
+        }
+        return nil
+    }
+
+    /// Extract ASIN (10-char alphanumeric ID) from any Amazon URL
+    private func extractASIN(from url: URL) -> String? {
+        let components = url.pathComponents
+        if let dpIndex = components.firstIndex(of: "dp"),
+           dpIndex + 1 < components.count {
+            let asin = components[dpIndex + 1]
+            // ASIN is always 10 alphanumeric characters
+            if asin.count == 10 && asin.allSatisfy({ $0.isLetter || $0.isNumber }) {
+                return asin
+            }
+        }
+        // Also check query params (some URLs have ?asin=)
+        if let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+           let asin = queryItems.first(where: { $0.name.lowercased() == "asin" })?.value {
+            return asin
+        }
+        return nil
+    }
+
+    /// Extract Flipkart item ID from URL
+    private func extractFlipkartItemID(from url: URL) -> String? {
+        let components = url.pathComponents
+        if let pIndex = components.firstIndex(of: "p"),
+           pIndex + 1 < components.count {
+            let itemId = components[pIndex + 1]
+            if itemId.count > 3 { return itemId }
+        }
+        // Check query param: ?pid=
+        if let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+           let pid = queryItems.first(where: { $0.name.lowercased() == "pid" })?.value {
+            return pid
         }
         return nil
     }

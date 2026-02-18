@@ -74,7 +74,11 @@ Rules:
 - If a retailer doesn't have the product, don't include it
 - Sort prices low to high`;
 
-  const userMessage = `Find the current price of "${query}" across all major Indian retailers. Include any ongoing offers or discounts.`;
+  // If query contains an ASIN or item ID, tell Perplexity to look it up
+  const isASINQuery = /Amazon ASIN [A-Z0-9]{10}/i.test(query) || /Flipkart item /i.test(query);
+  const userMessage = isASINQuery
+    ? `Identify this product and find its current price across all major Indian retailers: ${query}. First identify what the product is, then find prices. Include any ongoing offers or discounts.`
+    : `Find the current price of "${query}" across all major Indian retailers. Include any ongoing offers or discounts.`;
 
   const response = await fetch("https://api.perplexity.ai/chat/completions", {
     method: "POST",
