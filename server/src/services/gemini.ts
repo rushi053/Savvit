@@ -57,9 +57,9 @@ export async function generateVerdict(input: VerdictInput): Promise<Verdict> {
 PRODUCT: ${input.productName}
 
 CURRENT PRICES:
-${input.currentPrices.map((p) => `- ${p.retailer}: ₹${p.price.toLocaleString("en-IN")}${p.offers ? ` (${p.offers})` : ""}`).join("\n")}
+${input.currentPrices.map((p) => `- ${p.retailer}: ₹${(p.price ?? 0).toLocaleString("en-IN")}${p.offers ? ` (${p.offers})` : ""}`).join("\n")}
 
-BEST PRICE: ${input.bestPrice ? `₹${input.bestPrice.price.toLocaleString("en-IN")} on ${input.bestPrice.retailer}` : "Unknown"}
+BEST PRICE: ${input.bestPrice ? `₹${(input.bestPrice.price ?? 0).toLocaleString("en-IN")} on ${input.bestPrice.retailer}` : "Unknown"}
 
 ${
   input.priceHistory

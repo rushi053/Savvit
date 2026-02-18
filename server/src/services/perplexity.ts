@@ -114,10 +114,20 @@ Rules:
     throw new Error("Could not parse price search response");
   }
 
-  // Defensive: ensure prices is an array
+  // Defensive: ensure prices is an array with valid data
   if (!Array.isArray(result.prices)) {
     console.error("[perplexity] prices is not an array:", typeof result.prices);
     result.prices = [];
+  }
+  // Ensure every price is a number
+  result.prices = result.prices.map((p) => ({
+    ...p,
+    price: typeof p.price === "number" ? p.price : parseInt(String(p.price).replace(/[^0-9]/g, ""), 10) || 0,
+  }));
+  if (result.bestPrice) {
+    result.bestPrice.price = typeof result.bestPrice.price === "number"
+      ? result.bestPrice.price
+      : parseInt(String(result.bestPrice.price).replace(/[^0-9]/g, ""), 10) || 0;
   }
   result.citations = citations;
 
