@@ -1,61 +1,84 @@
-//
-//  ContentView.swift
-//  Savvit
-//
-//  Created by Rushiraj Jadeja on 2/18/26.
-//
-
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var selectedTab = 1
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
+        TabView(selection: $selectedTab) {
+            HomeTabPlaceholder()
+                .tabItem {
+                    Label("Home", systemImage: "house.fill")
                 }
-                .onDelete(perform: deleteItems)
+                .tag(0)
+
+            SearchView()
+                .tabItem {
+                    Label("Search", systemImage: "magnifyingglass")
+                }
+                .tag(1)
+
+            SettingsTabPlaceholder()
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape.fill")
+                }
+                .tag(2)
+        }
+        .tint(Theme.savvitPrimary)
+        .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - Placeholder Tabs (Phase 3 & 4)
+
+private struct HomeTabPlaceholder: View {
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Theme.bgPrimary.ignoresSafeArea()
+
+                VStack(spacing: Theme.spacingLG) {
+                    Image(systemName: "bag")
+                        .font(.system(size: 56, weight: .light))
+                        .foregroundStyle(Theme.textTertiary)
+
+                    Text("Your watchlist is empty")
+                        .font(Theme.cardTitle)
+                        .foregroundStyle(Theme.textPrimary)
+
+                    Text("Search for a product to get\nyour first AI verdict")
+                        .font(Theme.bodyText)
+                        .foregroundStyle(Theme.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
+            .navigationTitle("Savvit")
+            .toolbarColorScheme(.dark, for: .navigationBar)
         }
     }
+}
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
+private struct SettingsTabPlaceholder: View {
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Theme.bgPrimary.ignoresSafeArea()
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+                VStack(spacing: Theme.spacingMD) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 56, weight: .light))
+                        .foregroundStyle(Theme.textTertiary)
+
+                    Text("Settings coming soon")
+                        .font(Theme.bodyText)
+                        .foregroundStyle(Theme.textSecondary)
+                }
             }
+            .navigationTitle("Settings")
+            .toolbarColorScheme(.dark, for: .navigationBar)
         }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }
