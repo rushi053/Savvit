@@ -162,7 +162,10 @@ Rules:
       : `https://www.google.com/search?q=${encodeURIComponent(productName + " " + result.bestPrice.retailer + " buy")}`;
   }
 
-  setCache(cacheKey, result, CACHE_TTL.PRICES);
+  // Only cache if we got meaningful results
+  if (result.prices.length > 0 && result.prices.some((p) => p.price > 0)) {
+    setCache(cacheKey, result, CACHE_TTL.PRICES);
+  }
   return result;
 }
 

@@ -15,7 +15,7 @@ app.use("*", cors());
 
 // Health check
 app.get("/health", (c) => {
-  return c.json({ status: "ok", service: "savvit-api", timestamp: new Date().toISOString() });
+  return c.json({ status: "ok", service: "savvit-api", version: "1.0.4", timestamp: new Date().toISOString() });
 });
 
 // Public routes (no auth needed)
