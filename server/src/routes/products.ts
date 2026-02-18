@@ -20,55 +20,112 @@ function isUrl(s: string): boolean {
 }
 
 /**
- * Resolve a product URL to a product name using Perplexity (which can actually browse).
- * Scraping Amazon/Flipkart directly is unreliable (compression, CAPTCHAs, bot blocking).
+ * Resolve a product URL to a product name.
+ * Strategy:
+ * 1. Follow redirects to get the final URL
+ * 2. Extract product name from URL slug (Amazon, Flipkart patterns)
+ * 3. Fallback: use Perplexity to identify (unreliable — sometimes refuses)
  */
 async function resolveProductUrl(url: string): Promise<string> {
-  // Ensure protocol
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
 
+  // Step 1: Follow redirects to get final URL
+  let finalUrl = url;
+  try {
+    const resp = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+      },
+    });
+    finalUrl = resp.url;
+  } catch {
+    // If HEAD fails, try GET
+    try {
+      const resp = await fetch(url, {
+        redirect: "follow",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+          "Accept-Encoding": "identity",
+        },
+      });
+      finalUrl = resp.url;
+    } catch {
+      // Can't resolve — fall through to Perplexity
+    }
+  }
+
+  console.log(`[URL resolve] redirect: ${url} → ${finalUrl}`);
+
+  // Step 2: Extract product name from URL patterns
+  let extracted: string | null = null;
+
+  // Amazon: /Product-Name-Here/dp/ASIN
+  const amazonMatch = finalUrl.match(/amazon\.\w+(?:\.\w+)?\/([^/]+)\/dp\//i);
+  if (amazonMatch) {
+    extracted = amazonMatch[1]
+      .replace(/-/g, " ")
+      .replace(/\b\w/g, (c) => c) // keep original case
+      .trim();
+  }
+
+  // Flipkart: /product-name/p/itm...
+  if (!extracted) {
+    const flipkartMatch = finalUrl.match(/flipkart\.com\/([^/]+)\/p\//i);
+    if (flipkartMatch) {
+      extracted = flipkartMatch[1].replace(/-/g, " ").trim();
+    }
+  }
+
+  // Croma: /product-name/p/...
+  if (!extracted) {
+    const cromaMatch = finalUrl.match(/croma\.com\/([^/]+)\/p\//i);
+    if (cromaMatch) {
+      extracted = cromaMatch[1].replace(/-/g, " ").trim();
+    }
+  }
+
+  if (extracted && extracted.length > 3) {
+    console.log(`[URL resolve] extracted from URL: "${extracted}"`);
+    return extracted;
+  }
+
+  // Step 3: Fallback — ask Perplexity (may or may not work)
   const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY || "";
+  try {
+    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "sonar",
+        messages: [
+          {
+            role: "system",
+            content: `You are a product identifier. Given a product URL, return ONLY the exact product name. Nothing else — no explanation, no markdown, no quotes.`,
+          },
+          { role: "user", content: `What product is this? ${finalUrl}` },
+        ],
+        temperature: 0.1,
+      }),
+    });
 
-  const response = await fetch("https://api.perplexity.ai/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "sonar",
-      messages: [
-        {
-          role: "system",
-          content: `You are a product identifier. Given a product URL, return ONLY the exact product name with key specs (brand, model, storage/size/color if relevant). Nothing else — no explanation, no markdown, no quotes. Just the product name.
-
-Examples:
-- "Apple iPhone 16 Pro 256GB Black Titanium"
-- "Sony WH-1000XM5 Wireless Noise Cancelling Headphones Black"
-- "Philips HD2582/90 830W 2-Slice Pop-Up Toaster"`,
-        },
-        {
-          role: "user",
-          content: `What product is this? ${url}`,
-        },
-      ],
-      temperature: 0.1,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Could not identify product from URL (API ${response.status})`);
+    if (response.ok) {
+      const data = await response.json();
+      const name = data.choices?.[0]?.message?.content?.trim();
+      if (name && name.length > 3 && name.length < 200 && !name.includes("don't have") && !name.includes("cannot")) {
+        console.log(`[URL resolve] Perplexity: "${name}"`);
+        return name;
+      }
+    }
+  } catch {
+    // Perplexity failed — last resort below
   }
 
-  const data = await response.json();
-  const productName = data.choices?.[0]?.message?.content?.trim();
-
-  if (!productName || productName.length < 3 || productName.length > 200) {
-    throw new Error("Could not determine product name from URL. Please enter the product name instead.");
-  }
-
-  console.log(`[URL resolve] ${url} → "${productName}"`);
-  return productName;
+  throw new Error("Could not determine product name from URL. Please enter the product name instead.");
 }
 
 /**
