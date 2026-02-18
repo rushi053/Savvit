@@ -35,11 +35,11 @@ struct VerdictDetailView: View {
                         .offset(y: showContent ? 0 : 40)
                 }
 
-                if let citations = result.citations, !citations.isEmpty {
+                    if let citations = result.citations, !citations.isEmpty {
                     citationsSection
                         .opacity(showContent ? 1 : 0)
                 }
-            }
+
                 watchlistButton
                     .opacity(showContent ? 1 : 0)
                     .padding(.top, Theme.spacingSM)
