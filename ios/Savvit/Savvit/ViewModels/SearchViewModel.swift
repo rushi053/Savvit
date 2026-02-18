@@ -53,11 +53,8 @@ class SearchViewModel {
         }
     }
 
-    func searchFromURL(_ urlString: String) async {
-        let productName = extractProductName(from: urlString)
-        searchQuery = productName ?? urlString
-        await search()
-    }
+    var isResolvingURL = false
+    var resolvedProductName: String?
 
     func searchRecent(_ query: String) {
         searchQuery = query
@@ -68,35 +65,167 @@ class SearchViewModel {
         errorMessage = nil
     }
 
-    // MARK: - URL Product Name Extraction
+    // MARK: - Unified Search (text or URL)
 
-    private func extractProductName(from urlString: String) -> String? {
-        guard let url = URL(string: urlString) else { return nil }
-        let host = url.host?.lowercased() ?? ""
+    /// Detects if the query is a URL. If so, resolves it client-side first.
+    func unifiedSearch() async {
+        let input = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty else { return }
 
-        // Amazon: /dp/ASIN or /product-name/dp/ASIN
-        if host.contains("amazon") {
-            let pathComponents = url.pathComponents
-            if let dpIndex = pathComponents.firstIndex(of: "dp"), dpIndex > 1 {
-                let name = pathComponents[dpIndex - 1]
-                    .replacingOccurrences(of: "-", with: " ")
-                    .trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty && name != "/" { return name }
-            }
+        if isURL(input) {
+            await searchFromURL(input)
+        } else {
+            await search()
+        }
+    }
+
+    private func searchFromURL(_ urlString: String) async {
+        isResolvingURL = true
+        resolvedProductName = nil
+
+        do {
+            let productName = try await resolveProductURL(urlString)
+            resolvedProductName = productName
+            searchQuery = productName
+            isResolvingURL = false
+            await search()
+        } catch {
+            isResolvingURL = false
+            errorMessage = "Couldn't identify product from that link. Try searching by name instead."
+        }
+    }
+
+    // MARK: - URL Detection
+
+    func isURL(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return trimmed.hasPrefix("http://")
+            || trimmed.hasPrefix("https://")
+            || trimmed.hasPrefix("amzn.in/")
+            || trimmed.hasPrefix("amzn.to/")
+            || trimmed.hasPrefix("dl.flipkart.com/")
+            || trimmed.hasPrefix("fkrt.it/")
+            || trimmed.contains("amazon.") && trimmed.contains("/dp/")
+            || trimmed.contains("flipkart.com/")
+    }
+
+    // MARK: - Client-Side URL Resolution
+
+    /// Resolves a short/full product URL to a product name entirely on-device.
+    /// Strategy: follow redirects (phone isn't blocked like cloud servers) → extract name from URL slug.
+    private func resolveProductURL(_ urlString: String) async throws -> String {
+        var urlStr = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !urlStr.lowercased().hasPrefix("http") {
+            urlStr = "https://" + urlStr
         }
 
-        // Flipkart: /product-name/p/ITEMID
-        if host.contains("flipkart") {
-            let pathComponents = url.pathComponents
-            if let pIndex = pathComponents.firstIndex(of: "p"), pIndex > 1 {
-                let name = pathComponents[pIndex - 1]
-                    .replacingOccurrences(of: "-", with: " ")
-                    .trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty && name != "/" { return name }
-            }
+        guard let url = URL(string: urlStr) else {
+            throw URLError(.badURL)
         }
 
+        // Follow redirects to get the final URL
+        let config = URLSessionConfiguration.ephemeral
+        config.httpAdditionalHeaders = [
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+        ]
+        let session = URLSession(configuration: config)
+
+        let (_, response) = try await session.data(from: url)
+        let finalURL = response.url ?? url
+        let finalURLString = finalURL.absoluteString
+
+        // Try to extract product name from known URL patterns
+        if let name = extractFromAmazonURL(finalURL) ?? extractFromFlipkartURL(finalURL) ?? extractFromCromaURL(finalURL) {
+            return name
+        }
+
+        // Fallback: try to get page title
+        if let title = try? await fetchPageTitle(url: finalURL, session: session) {
+            return title
+        }
+
+        // Last resort: use the URL path
+        let pathSlug = finalURL.pathComponents
+            .filter { $0 != "/" && $0.count > 3 && !$0.starts(with: "ref=") }
+            .first?
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+
+        if let slug = pathSlug, slug.count > 3 {
+            return slug
+        }
+
+        throw NSError(domain: "Savvit", code: 0, userInfo: [NSLocalizedDescriptionKey: "Could not identify product"])
+    }
+
+    private func extractFromAmazonURL(_ url: URL) -> String? {
+        let components = url.pathComponents
+        // Pattern: /Product-Name/dp/ASIN
+        if let dpIndex = components.firstIndex(of: "dp"), dpIndex > 1 {
+            let slug = components[dpIndex - 1]
+                .replacingOccurrences(of: "-", with: " ")
+                .trimmingCharacters(in: .whitespaces)
+            if slug.count > 3 && slug != "/" { return slug }
+        }
         return nil
+    }
+
+    private func extractFromFlipkartURL(_ url: URL) -> String? {
+        let components = url.pathComponents
+        // Pattern: /product-name/p/ITEMID
+        if let pIndex = components.firstIndex(of: "p"), pIndex > 1 {
+            let slug = components[pIndex - 1]
+                .replacingOccurrences(of: "-", with: " ")
+                .trimmingCharacters(in: .whitespaces)
+            if slug.count > 3 && slug != "/" { return slug }
+        }
+        return nil
+    }
+
+    private func extractFromCromaURL(_ url: URL) -> String? {
+        let components = url.pathComponents
+        if let pIndex = components.firstIndex(of: "p"), pIndex > 1 {
+            let slug = components[pIndex - 1]
+                .replacingOccurrences(of: "-", with: " ")
+                .trimmingCharacters(in: .whitespaces)
+            if slug.count > 3 && slug != "/" { return slug }
+        }
+        return nil
+    }
+
+    private func fetchPageTitle(url: URL, session: URLSession) async throws -> String? {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("text/html", forHTTPHeaderField: "Accept")
+
+        let (data, _) = try await session.data(for: request)
+        guard let html = String(data: data, encoding: .utf8) else { return nil }
+
+        // Extract <title> tag
+        guard let titleStart = html.range(of: "<title", options: .caseInsensitive),
+              let tagEnd = html[titleStart.upperBound...].range(of: ">"),
+              let titleEnd = html[tagEnd.upperBound...].range(of: "</title>", options: .caseInsensitive)
+        else { return nil }
+
+        var title = String(html[tagEnd.upperBound..<titleEnd.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Clean common retailer suffixes
+        let suffixes = [
+            " - Amazon.in", " : Amazon.in", " | Amazon.in",
+            " - Flipkart.com", " | Flipkart.com",
+            " - Buy Online", " | Buy Online",
+            "Online at Best Price", " at Best Price in India",
+            " | Croma", " - Croma"
+        ]
+        for suffix in suffixes {
+            if let range = title.range(of: suffix, options: .caseInsensitive) {
+                title = String(title[..<range.lowerBound])
+            }
+        }
+
+        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.count > 3 ? title : nil
     }
 
     // MARK: - Recent Searches

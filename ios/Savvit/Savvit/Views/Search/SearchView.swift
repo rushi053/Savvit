@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SearchView: View {
     @State private var viewModel = SearchViewModel()
-    @State private var urlInput = ""
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
@@ -49,10 +48,6 @@ struct SearchView: View {
             VStack(spacing: Theme.spacingXL) {
                 searchBar
 
-                orDivider
-
-                urlPasteBar
-
                 if !viewModel.recentSearches.isEmpty {
                     recentSearchesList
                 }
@@ -70,69 +65,52 @@ struct SearchView: View {
     }
 
     private var searchBar: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Theme.textTertiary)
-
-            TextField("Search any product...", text: $viewModel.searchQuery)
-                .font(Theme.bodyText)
-                .foregroundStyle(Theme.textPrimary)
-                .focused($isSearchFocused)
-                .submitLabel(.search)
-                .onSubmit {
-                    Task { await viewModel.search() }
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                if viewModel.isResolvingURL {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .tint(Theme.savvitPrimary)
+                } else {
+                    Image(systemName: viewModel.isURL(viewModel.searchQuery) ? "link" : "magnifyingglass")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Theme.textTertiary)
+                        .contentTransition(.symbolEffect(.replace))
                 }
 
-            if !viewModel.searchQuery.isEmpty {
-                Button {
-                    viewModel.searchQuery = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Theme.textTertiary)
+                TextField("Search or paste a product link...", text: $viewModel.searchQuery)
+                    .font(Theme.bodyText)
+                    .foregroundStyle(Theme.textPrimary)
+                    .focused($isSearchFocused)
+                    .submitLabel(.search)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(viewModel.isURL(viewModel.searchQuery))
+                    .onSubmit {
+                        Task { await viewModel.unifiedSearch() }
+                    }
+
+                if !viewModel.searchQuery.isEmpty {
+                    Button {
+                        viewModel.searchQuery = ""
+                        viewModel.resolvedProductName = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(Theme.textTertiary)
+                    }
                 }
             }
-        }
-        .padding(Theme.spacingMD)
-        .background(Theme.bgSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLG))
-    }
+            .padding(Theme.spacingMD)
+            .background(Theme.bgSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLG))
 
-    private var orDivider: some View {
-        HStack(spacing: 12) {
-            Rectangle()
-                .frame(height: 1)
-                .foregroundStyle(Theme.bgTertiary)
-            Text("OR")
-                .font(Theme.caption)
-                .foregroundStyle(Theme.textTertiary)
-            Rectangle()
-                .frame(height: 1)
-                .foregroundStyle(Theme.bgTertiary)
+            if viewModel.isResolvingURL {
+                Text("Identifying product...")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.savvitPrimary)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-    }
-
-    private var urlPasteBar: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "link")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Theme.textTertiary)
-
-            TextField("Paste Amazon/Flipkart link...", text: $urlInput)
-                .font(Theme.bodyText)
-                .foregroundStyle(Theme.textPrimary)
-                .submitLabel(.search)
-                .onSubmit {
-                    let url = urlInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !url.isEmpty else { return }
-                    Task { await viewModel.searchFromURL(url) }
-                }
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-        }
-        .padding(Theme.spacingMD)
-        .background(Theme.bgSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLG))
+        .animation(.easeInOut(duration: 0.2), value: viewModel.isResolvingURL)
     }
 
     private var recentSearchesList: some View {
