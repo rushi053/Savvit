@@ -13,6 +13,57 @@ import { findProductCycle } from "../data/product-cycles.js";
 export const productRoutes = new Hono();
 
 /**
+ * Detect if a string is a URL (http/https or common shorteners).
+ */
+function isUrl(s: string): boolean {
+  return /^https?:\/\//i.test(s) || /^(amzn\.in|bit\.ly|tinyurl\.com|fkrt\.it)\//i.test(s);
+}
+
+/**
+ * Resolve a product URL to a product name.
+ * Follows redirects, extracts the product name from the page title.
+ */
+async function resolveProductUrl(url: string): Promise<string> {
+  // Ensure protocol
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+
+  // Follow redirects to get the real URL + page content
+  const resp = await fetch(url, {
+    redirect: "follow",
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; Savvit/1.0)" },
+  });
+  const finalUrl = resp.url;
+  const html = await resp.text();
+
+  // Extract title
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  let title = titleMatch?.[1]?.trim() || "";
+
+  // Clean common suffixes
+  title = title
+    .replace(/\s*[-:|]\s*(Amazon\.in|Amazon|Flipkart|Croma|Buy Online).*$/i, "")
+    .replace(/\s*:\s*Buy .+$/i, "")
+    .replace(/Online at Best Price.*$/i, "")
+    .trim();
+
+  // If we got a reasonable product name from title, use it
+  if (title && title.length > 3 && title.length < 200) {
+    console.log(`[URL resolve] ${url} → "${title}"`);
+    return title;
+  }
+
+  // Fallback: try to extract from Amazon URL path
+  const amazonMatch = finalUrl.match(/\/([^/]+)\/dp\//);
+  if (amazonMatch) {
+    const slug = amazonMatch[1].replace(/-/g, " ");
+    console.log(`[URL resolve] ${url} → slug: "${slug}"`);
+    return slug;
+  }
+
+  throw new Error("Could not determine product name from URL. Please enter the product name instead.");
+}
+
+/**
  * POST /v1/products/search
  * The main endpoint — search for a product and get the full verdict.
  * This is the magic endpoint that powers the app.
@@ -25,7 +76,16 @@ productRoutes.post("/search", async (c) => {
     return c.json({ error: "Query must be at least 2 characters" }, 400);
   }
 
-  const trimmedQuery = query.trim();
+  let trimmedQuery = query.trim();
+
+  // If query is a URL, resolve it to a product name first
+  if (isUrl(trimmedQuery)) {
+    try {
+      trimmedQuery = await resolveProductUrl(trimmedQuery);
+    } catch (err: any) {
+      return c.json({ error: err.message, code: "URL_RESOLVE_FAILED" }, 400);
+    }
+  }
 
   try {
     // Step 1: Get current prices across retailers (Perplexity)

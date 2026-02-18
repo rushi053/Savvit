@@ -102,10 +102,23 @@ Rules:
 
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
+    console.error("[perplexity] No JSON in response:", content.substring(0, 300));
     throw new Error("Could not parse price search response");
   }
 
-  const result: PriceSearchResult = JSON.parse(jsonMatch[0]);
+  let result: PriceSearchResult;
+  try {
+    result = JSON.parse(jsonMatch[0]);
+  } catch (e) {
+    console.error("[perplexity] JSON parse failed:", jsonMatch[0].substring(0, 300));
+    throw new Error("Could not parse price search response");
+  }
+
+  // Defensive: ensure prices is an array
+  if (!Array.isArray(result.prices)) {
+    console.error("[perplexity] prices is not an array:", typeof result.prices);
+    result.prices = [];
+  }
   result.citations = citations;
 
   // Replace LLM-hallucinated URLs with real search URLs
