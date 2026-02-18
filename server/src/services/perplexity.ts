@@ -56,7 +56,7 @@ Return this exact JSON structure:
       "retailer": "Amazon India",
       "price": 119900,
       "currency": "INR",
-      "url": "product URL if found",
+      "url": "leave empty string, will be auto-generated",
       "offers": "any special offers, EMI, bank discounts",
       "inStock": true
     }
@@ -107,6 +107,37 @@ Rules:
 
   const result: PriceSearchResult = JSON.parse(jsonMatch[0]);
   result.citations = citations;
+
+  // Replace LLM-hallucinated URLs with real search URLs
+  const searchUrlMap: Record<string, (q: string) => string> = {
+    "amazon india": (q) => `https://www.amazon.in/s?k=${encodeURIComponent(q)}`,
+    "amazon": (q) => `https://www.amazon.in/s?k=${encodeURIComponent(q)}`,
+    "flipkart": (q) => `https://www.flipkart.com/search?q=${encodeURIComponent(q)}`,
+    "croma": (q) => `https://www.croma.com/searchB?q=${encodeURIComponent(q)}`,
+    "reliance digital": (q) => `https://www.reliancedigital.in/search?q=${encodeURIComponent(q)}`,
+    "vijay sales": (q) => `https://www.vijaysales.com/search/${encodeURIComponent(q)}`,
+    "tata cliq": (q) => `https://www.tatacliq.com/search/?searchCategory=all&text=${encodeURIComponent(q)}`,
+    "iplanet": (q) => `https://iplanet.one/search?q=${encodeURIComponent(q)}`,
+  };
+
+  const productName = result.productName || query;
+  for (const price of result.prices) {
+    const key = price.retailer.toLowerCase();
+    const urlBuilder = searchUrlMap[key] || Object.entries(searchUrlMap).find(([k]) => key.includes(k))?.[1];
+    if (urlBuilder) {
+      price.url = urlBuilder(productName);
+    } else {
+      // Unknown retailer — build a Google search fallback
+      price.url = `https://www.google.com/search?q=${encodeURIComponent(productName + " " + price.retailer + " buy")}`;
+    }
+  }
+  if (result.bestPrice) {
+    const key = result.bestPrice.retailer.toLowerCase();
+    const urlBuilder = searchUrlMap[key] || Object.entries(searchUrlMap).find(([k]) => key.includes(k))?.[1];
+    result.bestPrice.url = urlBuilder
+      ? urlBuilder(productName)
+      : `https://www.google.com/search?q=${encodeURIComponent(productName + " " + result.bestPrice.retailer + " buy")}`;
+  }
 
   setCache(cacheKey, result, CACHE_TTL.PRICES);
   return result;
