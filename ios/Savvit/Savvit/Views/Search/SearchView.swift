@@ -123,11 +123,9 @@ struct SearchView: View {
                 .foregroundStyle(Theme.textPrimary)
                 .submitLabel(.search)
                 .onSubmit {
-                    guard !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                        return
-                    }
-                    viewModel.searchQuery = urlInput
-                    Task { await viewModel.search() }
+                    let url = urlInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !url.isEmpty else { return }
+                    Task { await viewModel.searchFromURL(url) }
                 }
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()

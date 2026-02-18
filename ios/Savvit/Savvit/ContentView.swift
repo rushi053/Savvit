@@ -1,11 +1,12 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var selectedTab = 1
+    @State private var selectedTab = 0
+    @State private var watchlistVM = WatchlistViewModel()
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            HomeTabPlaceholder()
+            HomeView()
                 .tabItem {
                     Label("Home", systemImage: "house.fill")
                 }
@@ -25,37 +26,11 @@ struct ContentView: View {
         }
         .tint(Theme.savvitPrimary)
         .preferredColorScheme(.dark)
+        .environment(watchlistVM)
     }
 }
 
-// MARK: - Placeholder Tabs (Phase 3 & 4)
-
-private struct HomeTabPlaceholder: View {
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Theme.bgPrimary.ignoresSafeArea()
-
-                VStack(spacing: Theme.spacingLG) {
-                    Image(systemName: "bag")
-                        .font(.system(size: 56, weight: .light))
-                        .foregroundStyle(Theme.textTertiary)
-
-                    Text("Your watchlist is empty")
-                        .font(Theme.cardTitle)
-                        .foregroundStyle(Theme.textPrimary)
-
-                    Text("Search for a product to get\nyour first AI verdict")
-                        .font(Theme.bodyText)
-                        .foregroundStyle(Theme.textSecondary)
-                        .multilineTextAlignment(.center)
-                }
-            }
-            .navigationTitle("Savvit")
-            .toolbarColorScheme(.dark, for: .navigationBar)
-        }
-    }
-}
+// MARK: - Placeholder (Phase 4)
 
 private struct SettingsTabPlaceholder: View {
     var body: some View {

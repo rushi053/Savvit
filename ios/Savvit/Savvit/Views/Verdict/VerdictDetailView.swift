@@ -3,8 +3,10 @@ import SwiftUI
 struct VerdictDetailView: View {
     let result: ProductSearchResult
 
+    @Environment(WatchlistViewModel.self) private var watchlist
     @State private var showVerdict = false
     @State private var showContent = false
+    @State private var showProUpgrade = false
 
     var body: some View {
         ScrollView {
@@ -37,6 +39,10 @@ struct VerdictDetailView: View {
                     citationsSection
                         .opacity(showContent ? 1 : 0)
                 }
+            }
+                watchlistButton
+                    .opacity(showContent ? 1 : 0)
+                    .padding(.top, Theme.spacingSM)
             }
             .padding(.horizontal, Theme.spacingLG)
             .padding(.bottom, 60)
@@ -253,10 +259,13 @@ struct VerdictDetailView: View {
 
             if let month = sale.month, (1...12).contains(month) {
                 let monthName = Calendar.current.monthSymbols[month - 1]
+                let year = Calendar.current.component(.year, from: Date())
+                let currentMonth = Calendar.current.component(.month, from: Date())
+                let displayYear = month >= currentMonth ? year : year + 1
                 HStack(spacing: 6) {
                     Image(systemName: "calendar")
                         .font(.system(size: 12))
-                    Text("\(monthName) 2026")
+                    Text("\(monthName) \(String(displayYear))")
                 }
                 .font(Theme.bodyText)
                 .foregroundStyle(Theme.textSecondary)
@@ -353,6 +362,50 @@ struct VerdictDetailView: View {
             }
         }
         .padding(.top, 8)
+    }
+
+    // MARK: - Watchlist Button
+
+    private var watchlistButton: some View {
+        Group {
+            if watchlist.isInWatchlist(query: result.query) {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("In Your Watchlist")
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.verdictBuy)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(Theme.verdictBuy.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMD))
+            } else {
+                Button {
+                    if watchlist.isAtFreeLimit {
+                        showProUpgrade = true
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } else {
+                        watchlist.addItem(from: result)
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Add to Watchlist")
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Theme.savvitPrimary.gradient)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMD))
+                }
+            }
+        }
+        .alert("Watchlist Full", isPresented: $showProUpgrade) {
+            Button("Maybe Later", role: .cancel) {}
+        } message: {
+            Text("Free plan allows \(Constants.freeWatchlistLimit) items. Upgrade to Pro for unlimited tracking.")
+        }
     }
 
     // MARK: - Helpers

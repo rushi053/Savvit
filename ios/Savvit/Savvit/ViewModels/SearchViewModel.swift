@@ -2,6 +2,7 @@ import Foundation
 import Observation
 
 @Observable
+@MainActor
 class SearchViewModel {
     var searchQuery = ""
     var isLoading = false
@@ -30,6 +31,8 @@ class SearchViewModel {
             if !Task.isCancelled { loadingStep = "Analyzing prices..." }
             try? await Task.sleep(for: .seconds(5))
             if !Task.isCancelled { loadingStep = "Generating verdict..." }
+            try? await Task.sleep(for: .seconds(7))
+            if !Task.isCancelled { loadingStep = "Almost there..." }
         }
 
         do {
@@ -42,8 +45,18 @@ class SearchViewModel {
         } catch {
             loadingTask.cancel()
             isLoading = false
-            errorMessage = error.localizedDescription
+            if error.localizedDescription.contains("timed out") {
+                errorMessage = "Server is warming up. Please try again in a moment."
+            } else {
+                errorMessage = error.localizedDescription
+            }
         }
+    }
+
+    func searchFromURL(_ urlString: String) async {
+        let productName = extractProductName(from: urlString)
+        searchQuery = productName ?? urlString
+        await search()
     }
 
     func searchRecent(_ query: String) {
@@ -53,6 +66,37 @@ class SearchViewModel {
 
     func clearError() {
         errorMessage = nil
+    }
+
+    // MARK: - URL Product Name Extraction
+
+    private func extractProductName(from urlString: String) -> String? {
+        guard let url = URL(string: urlString) else { return nil }
+        let host = url.host?.lowercased() ?? ""
+
+        // Amazon: /dp/ASIN or /product-name/dp/ASIN
+        if host.contains("amazon") {
+            let pathComponents = url.pathComponents
+            if let dpIndex = pathComponents.firstIndex(of: "dp"), dpIndex > 1 {
+                let name = pathComponents[dpIndex - 1]
+                    .replacingOccurrences(of: "-", with: " ")
+                    .trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty && name != "/" { return name }
+            }
+        }
+
+        // Flipkart: /product-name/p/ITEMID
+        if host.contains("flipkart") {
+            let pathComponents = url.pathComponents
+            if let pIndex = pathComponents.firstIndex(of: "p"), pIndex > 1 {
+                let name = pathComponents[pIndex - 1]
+                    .replacingOccurrences(of: "-", with: " ")
+                    .trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty && name != "/" { return name }
+            }
+        }
+
+        return nil
     }
 
     // MARK: - Recent Searches
