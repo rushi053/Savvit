@@ -1,23 +1,22 @@
 import SwiftUI
 
 struct ShimmerView: View {
-    @State private var startPoint: UnitPoint = .init(x: -1.8, y: -1.2)
-    @State private var endPoint: UnitPoint = .init(x: 0, y: -0.2)
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var phase: CGFloat = -1.5
 
     var body: some View {
+        let shimmer = colorScheme == .dark
+            ? Color.white.opacity(0.06)
+            : Color.white.opacity(0.8)
+
         LinearGradient(
-            colors: [
-                Theme.bgTertiary.opacity(0.3),
-                Theme.bgTertiary.opacity(0.7),
-                Theme.bgTertiary.opacity(0.3),
-            ],
-            startPoint: startPoint,
-            endPoint: endPoint
+            colors: [.clear, shimmer, .clear],
+            startPoint: .init(x: phase - 0.5, y: 0.5),
+            endPoint: .init(x: phase + 0.5, y: 0.5)
         )
         .onAppear {
-            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: false)) {
-                startPoint = .init(x: 1, y: 1)
-                endPoint = .init(x: 2.8, y: 2.2)
+            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: false)) {
+                phase = 2.0
             }
         }
     }
@@ -27,12 +26,12 @@ struct ShimmerCard: View {
     var height: CGFloat = 80
 
     var body: some View {
-        RoundedRectangle(cornerRadius: Theme.radiusLG)
+        RoundedRectangle(cornerRadius: Theme.cornerRadius)
             .fill(Theme.bgSecondary)
             .frame(height: height)
             .overlay(
                 ShimmerView()
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLG))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
             )
     }
 }
@@ -44,5 +43,4 @@ struct ShimmerCard: View {
         ShimmerCard(height: 60)
     }
     .padding()
-    .background(Theme.bgPrimary)
 }

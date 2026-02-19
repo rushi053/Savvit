@@ -6,71 +6,78 @@ struct WatchlistCard: View {
 
     var body: some View {
         HStack(spacing: Theme.spacingMD) {
-            // Verdict indicator
-            Circle()
-                .fill(item.verdictType.color.gradient)
+            Text(productEmoji)
+                .font(.system(size: 20))
                 .frame(width: 44, height: 44)
-                .overlay(
-                    Image(systemName: item.verdictType.icon)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
-                )
-                .shadow(color: item.verdictType.color.opacity(0.3), radius: 8, y: 2)
+                .background(Theme.savvitBlue)
+                .clipShape(Circle())
 
-            // Product info
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.productName)
-                    .font(Theme.cardTitle)
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
 
-                if let price = item.bestPrice {
-                    HStack(spacing: 4) {
+                HStack(spacing: 8) {
+                    if let price = item.bestPrice {
                         Text(price.inrFormatted)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Theme.textSecondary)
-
-                        if let retailer = item.bestRetailer {
-                            Text("on \(retailer)")
-                                .font(Theme.finePrint)
-                                .foregroundStyle(Theme.textTertiary)
-                        }
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(Theme.textPrimary)
                     }
-                }
 
-                Text(item.shortReason)
-                    .font(Theme.caption)
-                    .foregroundStyle(item.verdictType.color)
-                    .lineLimit(1)
+                    Text(verdictLabel)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.textOnLime)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Theme.savvitLime)
+                        .clipShape(Capsule())
+                }
             }
 
             Spacer()
 
-            // Confidence
-            Text("\(Int(item.confidence * 100))%")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Theme.textTertiary)
         }
-        .padding(Theme.spacingMD)
-        .background(Theme.bgSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLG))
+        .padding(Theme.spacingLG)
+        .background(Theme.bgPrimary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cornerRadiusMD)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
         .contextMenu {
             Button(role: .destructive) {
-                withAnimation(.spring(response: 0.3)) {
+                withAnimation(Theme.snappy) {
                     watchlist.removeItem(id: item.id)
                 }
             } label: {
-                Label("Remove from Watchlist", systemImage: "trash")
+                Label("Remove", systemImage: "trash")
             }
         }
-        .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-                withAnimation(.spring(response: 0.3)) {
-                    watchlist.removeItem(id: item.id)
-                }
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
+    }
+
+    private var verdictLabel: String {
+        switch item.verdictType {
+        case .buyNow: "Buy Now"
+        case .wait: "Wait"
+        case .dontBuy: "Don't Buy"
         }
+    }
+
+    private var productEmoji: String {
+        let name = item.productName.lowercased()
+        if name.contains("phone") || name.contains("iphone") || name.contains("galaxy") || name.contains("pixel") { return "📱" }
+        if name.contains("airpods") || name.contains("headphone") || name.contains("wh-") || name.contains("buds") { return "🎧" }
+        if name.contains("ipad") || name.contains("tab") { return "📱" }
+        if name.contains("macbook") || name.contains("laptop") { return "💻" }
+        if name.contains("watch") { return "⌚" }
+        if name.contains("dyson") || name.contains("vacuum") { return "🧹" }
+        if name.contains("ps5") || name.contains("xbox") || name.contains("switch") { return "🎮" }
+        if name.contains("tv") || name.contains("monitor") { return "📺" }
+        if name.contains("camera") { return "📷" }
+        return "📦"
     }
 }

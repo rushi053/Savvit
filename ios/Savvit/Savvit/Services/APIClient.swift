@@ -52,7 +52,8 @@ final class APIClient: Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 120
-        request.httpBody = try JSONEncoder().encode(["query": query])
+        let region = Locale.current.region?.identifier ?? "US"
+        request.httpBody = try JSONEncoder().encode(["query": query, "region": region])
 
         let (data, response) = try await performRequest(request)
 

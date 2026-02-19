@@ -23,7 +23,7 @@ class SearchViewModel {
         isLoading = true
         errorMessage = nil
         searchResult = nil
-        showVerdict = false
+        showVerdict = true
         loadingStep = "Checking retailers..."
 
         let loadingTask = Task {
@@ -41,10 +41,10 @@ class SearchViewModel {
             searchResult = result
             saveToRecentSearches(query)
             isLoading = false
-            showVerdict = true
         } catch {
             loadingTask.cancel()
             isLoading = false
+            showVerdict = false
             if error.localizedDescription.contains("timed out") {
                 errorMessage = "Server is warming up. Please try again in a moment."
             } else {

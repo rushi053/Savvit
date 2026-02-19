@@ -3,55 +3,77 @@ import SwiftUI
 struct ContentView: View {
     @State private var selectedTab = 0
     @State private var watchlistVM = WatchlistViewModel()
+    @Namespace private var tabAnimation
+
+    init() {
+        UITabBar.appearance().isHidden = true
+    }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            HomeView()
-                .tabItem {
-                    Label("Home", systemImage: "house.fill")
-                }
-                .tag(0)
+        ZStack(alignment: .bottom) {
+            TabView(selection: $selectedTab) {
+                SearchView()
+                    .tag(0)
 
-            SearchView()
-                .tabItem {
-                    Label("Search", systemImage: "magnifyingglass")
-                }
-                .tag(1)
+                HomeView(selectedTab: $selectedTab)
+                    .tag(1)
 
-            SettingsTabPlaceholder()
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape.fill")
-                }
-                .tag(2)
+                SettingsView()
+                    .tag(2)
+            }
+
+            tabBar
         }
-        .tint(Theme.savvitPrimary)
-        .preferredColorScheme(.dark)
         .environment(watchlistVM)
     }
-}
 
-// MARK: - Placeholder (Phase 4)
+    // MARK: - Custom Floating Tab Bar
 
-private struct SettingsTabPlaceholder: View {
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Theme.bgPrimary.ignoresSafeArea()
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(tabs.enumerated()), id: \.offset) { index, tab in
+                Button {
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                        selectedTab = index
+                    }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 20, weight: selectedTab == index ? .semibold : .regular))
 
-                VStack(spacing: Theme.spacingMD) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 56, weight: .light))
-                        .foregroundStyle(Theme.textTertiary)
-
-                    Text("Settings coming soon")
-                        .font(Theme.bodyText)
-                        .foregroundStyle(Theme.textSecondary)
+                        Text(tab.label)
+                            .font(.system(size: 10, weight: selectedTab == index ? .semibold : .medium))
+                    }
+                    .foregroundStyle(selectedTab == index ? Theme.savvitLime : Theme.textSecondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background {
+                        if selectedTab == index {
+                            Capsule()
+                                .fill(Theme.savvitBlue)
+                                .matchedGeometryEffect(id: "tabPill", in: tabAnimation)
+                        }
+                    }
                 }
             }
-            .navigationTitle("Settings")
-            .toolbarColorScheme(.dark, for: .navigationBar)
         }
+        .padding(.horizontal, 6)
+        .background(
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .shadow(color: .black.opacity(0.08), radius: 15, y: 2)
+                .shadow(color: .black.opacity(0.03), radius: 1, y: 0)
+        )
+        .padding(.horizontal, Theme.spacingXL)
+        .padding(.bottom, 4)
     }
+
+    private let tabs: [(icon: String, label: String)] = [
+        ("magnifyingglass", "Search"),
+        ("eye", "Watchlist"),
+        ("gearshape", "Settings"),
+    ]
 }
 
 #Preview {
