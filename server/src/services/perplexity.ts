@@ -177,7 +177,7 @@ Rules:
  * Search for upcoming product launches and news.
  */
 export async function searchLaunchIntel(productName: string, category: string): Promise<LaunchIntel> {
-  const cacheKey = `launch:${category.toLowerCase().trim()}`;
+  const cacheKey = `launch:${productName.toLowerCase().trim()}:${category.toLowerCase().trim()}`;
   const cached = getCached<LaunchIntel>(cacheKey);
   if (cached) return cached;
 
