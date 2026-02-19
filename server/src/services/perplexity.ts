@@ -1,11 +1,12 @@
 /**
  * Perplexity Sonar — Web-augmented price search.
  * Used for:
- * 1. Real-time prices across ALL Indian retailers
+ * 1. Real-time prices across retailers (region-aware)
  * 2. Product launch news/rumors
  */
 
 import { getCached, setCache, CACHE_TTL } from "../utils/cache.js";
+import { RegionConfig, getRegionConfig, getRetailerSearchUrl } from "../data/region-config.js";
 
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY || "";
 const SONAR_MODEL = "sonar";
@@ -37,27 +38,30 @@ interface LaunchIntel {
 }
 
 /**
- * Search for current prices across Indian retailers.
+ * Search for current prices across retailers (region-aware).
  */
-export async function searchPrices(query: string): Promise<PriceSearchResult> {
-  const cacheKey = `prices:${query.toLowerCase().trim()}`;
+export async function searchPrices(query: string, region?: string): Promise<PriceSearchResult> {
+  const regionConfig = getRegionConfig(region);
+  const cacheKey = `prices:${regionConfig.code}:${query.toLowerCase().trim()}`;
   const cached = getCached<PriceSearchResult>(cacheKey);
   if (cached) return cached;
 
-  const systemPrompt = `You are a price research assistant for Indian e-commerce. Return ONLY valid JSON.
+  const retailerList = regionConfig.retailers.join(", ");
 
-Your job: Find the current price of a product across major Indian retailers.
+  const systemPrompt = `You are a price research assistant for ${regionConfig.name} e-commerce. Return ONLY valid JSON.
+
+Your job: Find the current price of a product across major ${regionConfig.name} retailers.
 
 Return this exact JSON structure:
 {
   "productName": "exact product name with variant/storage",
   "prices": [
     {
-      "retailer": "Amazon India",
-      "price": 119900,
-      "currency": "INR",
+      "retailer": "retailer name",
+      "price": 99900,
+      "currency": "${regionConfig.currency}",
       "url": "leave empty string, will be auto-generated",
-      "offers": "any special offers, EMI, bank discounts",
+      "offers": "any special offers, discounts, bundle deals",
       "inStock": true
     }
   ],
@@ -65,20 +69,20 @@ Return this exact JSON structure:
   "summary": "1-2 sentence summary of pricing landscape"
 }
 
-Retailers to check: Amazon India, Flipkart, Croma, Reliance Digital, Vijay Sales, Tata Cliq, and any other major Indian retailer.
+Retailers to check: ${retailerList}, and any other major ${regionConfig.name} retailer.
 
 Rules:
-- Prices in INR (integer, no decimals). 1,19,900 = 119900
-- Only include retailers that actually sell this product
-- Include any ongoing offers, bank discounts, EMI options in the "offers" field
+- Prices in ${regionConfig.currency} (integer, no decimals)
+- Only include retailers that actually sell this product in ${regionConfig.name}
+- Include any ongoing offers, bank discounts, bundle deals in the "offers" field
 - If a retailer doesn't have the product, don't include it
 - Sort prices low to high`;
 
   // If query contains an ASIN or item ID, tell Perplexity to look it up
   const isASINQuery = /Amazon ASIN [A-Z0-9]{10}/i.test(query) || /Flipkart item /i.test(query);
   const userMessage = isASINQuery
-    ? `Identify this product and find its current price across all major Indian retailers: ${query}. First identify what the product is, then find prices. Include any ongoing offers or discounts.`
-    : `Find the current price of "${query}" across all major Indian retailers. Include any ongoing offers or discounts.`;
+    ? `Identify this product and find its current price across all major ${regionConfig.name} retailers: ${query}. First identify what the product is, then find prices. Include any ongoing offers or discounts.`
+    : `Find the current price of "${query}" across all major ${regionConfig.name} retailers. Include any ongoing offers or discounts.`;
 
   const response = await fetch("https://api.perplexity.ai/chat/completions", {
     method: "POST",
@@ -135,35 +139,13 @@ Rules:
   }
   result.citations = citations;
 
-  // Replace LLM-hallucinated URLs with real search URLs
-  const searchUrlMap: Record<string, (q: string) => string> = {
-    "amazon india": (q) => `https://www.amazon.in/s?k=${encodeURIComponent(q)}`,
-    "amazon": (q) => `https://www.amazon.in/s?k=${encodeURIComponent(q)}`,
-    "flipkart": (q) => `https://www.flipkart.com/search?q=${encodeURIComponent(q)}`,
-    "croma": (q) => `https://www.croma.com/searchB?q=${encodeURIComponent(q)}`,
-    "reliance digital": (q) => `https://www.reliancedigital.in/search?q=${encodeURIComponent(q)}`,
-    "vijay sales": (q) => `https://www.vijaysales.com/search/${encodeURIComponent(q)}`,
-    "tata cliq": (q) => `https://www.tatacliq.com/search/?searchCategory=all&text=${encodeURIComponent(q)}`,
-    "iplanet": (q) => `https://iplanet.one/search?q=${encodeURIComponent(q)}`,
-  };
-
+  // Replace LLM-hallucinated URLs with real search URLs (region-aware)
   const productName = result.productName || query;
   for (const price of result.prices) {
-    const key = price.retailer.toLowerCase();
-    const urlBuilder = searchUrlMap[key] || Object.entries(searchUrlMap).find(([k]) => key.includes(k))?.[1];
-    if (urlBuilder) {
-      price.url = urlBuilder(productName);
-    } else {
-      // Unknown retailer — build a Google search fallback
-      price.url = `https://www.google.com/search?q=${encodeURIComponent(productName + " " + price.retailer + " buy")}`;
-    }
+    price.url = getRetailerSearchUrl(price.retailer, productName, regionConfig);
   }
   if (result.bestPrice) {
-    const key = result.bestPrice.retailer.toLowerCase();
-    const urlBuilder = searchUrlMap[key] || Object.entries(searchUrlMap).find(([k]) => key.includes(k))?.[1];
-    result.bestPrice.url = urlBuilder
-      ? urlBuilder(productName)
-      : `https://www.google.com/search?q=${encodeURIComponent(productName + " " + result.bestPrice.retailer + " buy")}`;
+    result.bestPrice.url = getRetailerSearchUrl(result.bestPrice.retailer, productName, regionConfig);
   }
 
   // Only cache if we got meaningful results

@@ -4,6 +4,8 @@
  * and produces a BUY/WAIT/DONT_BUY verdict with reasoning.
  */
 
+import { RegionConfig, getRegionConfig, formatPrice } from "../data/region-config.js";
+
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const MODEL = "gemini-2.0-flash-lite";
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`;
@@ -35,6 +37,7 @@ export interface VerdictInput {
     typicalLaunchMonth: number;
     lastLaunch: string;
   };
+  region?: string;
 }
 
 export interface Verdict {
@@ -52,22 +55,27 @@ export interface Verdict {
 }
 
 export async function generateVerdict(input: VerdictInput): Promise<Verdict> {
+  const rc = getRegionConfig(input.region);
+  const fp = (n: number) => formatPrice(n, rc);
+  const sym = rc.currencySymbol;
+
   const prompt = `You are Savvit, an AI purchase timing advisor. Analyze the data below and decide: should the user BUY NOW, WAIT, or DONT BUY this product?
 
 PRODUCT: ${input.productName}
+REGION: ${rc.name} (${rc.currency})
 
 CURRENT PRICES:
-${input.currentPrices.map((p) => `- ${p.retailer}: ₹${(p.price ?? 0).toLocaleString("en-IN")}${p.offers ? ` (${p.offers})` : ""}`).join("\n")}
+${input.currentPrices.map((p) => `- ${p.retailer}: ${fp(p.price ?? 0)}${p.offers ? ` (${p.offers})` : ""}`).join("\n")}
 
-BEST PRICE: ${input.bestPrice ? `₹${(input.bestPrice.price ?? 0).toLocaleString("en-IN")} on ${input.bestPrice.retailer}` : "Unknown"}
+BEST PRICE: ${input.bestPrice ? `${fp(input.bestPrice.price ?? 0)} on ${input.bestPrice.retailer}` : "Unknown"}
 
 ${
   input.priceHistory
     ? `PRICE HISTORY:
-- All-time low: ₹${input.priceHistory.allTimeLow.toLocaleString("en-IN")}
-- All-time high: ₹${input.priceHistory.allTimeHigh.toLocaleString("en-IN")}
-- 90-day average: ₹${input.priceHistory.avg90d.toLocaleString("en-IN")}
-- 180-day average: ₹${input.priceHistory.avg180d.toLocaleString("en-IN")}
+- All-time low: ${fp(input.priceHistory.allTimeLow)}
+- All-time high: ${fp(input.priceHistory.allTimeHigh)}
+- 90-day average: ${fp(input.priceHistory.avg90d)}
+- 180-day average: ${fp(input.priceHistory.avg180d)}
 - Current vs average: ${input.priceHistory.currentVsAvg}`
     : "PRICE HISTORY: Not available yet"
 }
@@ -98,8 +106,8 @@ Return ONLY valid JSON:
   "proAnalysis": {
     "bestCurrentDeal": "Where to buy right now and why",
     "waitReason": "Why waiting is smarter (or null if BUY_NOW)",
-    "estimatedSavings": "How much they could save by waiting (e.g. '₹8,000-12,000') or null",
-    "bestTimeToBuy": "When to buy for best price (e.g. 'October 2026 during Amazon Great Indian Festival') or null",
+    "estimatedSavings": "How much they could save by waiting (e.g. '${sym}8,000-12,000') or null",
+    "bestTimeToBuy": "When to buy for best price or null",
     "launchAlert": "Info about upcoming new model (or null)"
   },
   "shortReason": "One concise line (max 60 chars) for the verdict badge"
@@ -110,7 +118,7 @@ DECISION RULES:
 - WAIT: Major sale coming within 60 days, OR new model launching within 90 days, OR price is significantly above average
 - DONT_BUY: Price is at historical high, OR new model launching very soon (<30 days), OR clear price gouging
 - When unsure, lean WAIT — it's safer advice
-- Be specific with savings estimates and dates
+- Be specific with savings estimates and dates — use ${sym} for currency
 - shortReason should be punchy: "Near all-time low" or "New model in 5 weeks" or "Price spike — avoid"`;
 
   const response = await fetch(API_URL, {

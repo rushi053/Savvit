@@ -9,6 +9,7 @@ import { getAmazonPriceHistory } from "../services/keepa.js";
 import { generateVerdict, VerdictInput } from "../services/gemini.js";
 import { getNextSaleEvent } from "../data/sale-calendar.js";
 import { findProductCycle } from "../data/product-cycles.js";
+import { getRegionConfig, getSupportedRegions } from "../data/region-config.js";
 
 export const productRoutes = new Hono();
 
@@ -86,6 +87,38 @@ async function resolveProductUrl(url: string): Promise<string> {
     }
   }
 
+  // Best Buy: /site/product-name/skuId.p
+  if (!extracted) {
+    const bestbuyMatch = finalUrl.match(/bestbuy\.com?\/site\/([^/]+)\/\d+\.p/i);
+    if (bestbuyMatch) {
+      extracted = bestbuyMatch[1].replace(/-/g, " ").trim();
+    }
+  }
+
+  // Walmart: /ip/product-name/itemId
+  if (!extracted) {
+    const walmartMatch = finalUrl.match(/walmart\.com?\/ip\/([^/]+)\//i);
+    if (walmartMatch) {
+      extracted = walmartMatch[1].replace(/-/g, " ").trim();
+    }
+  }
+
+  // Target: /p/product-name/-/A-itemId
+  if (!extracted) {
+    const targetMatch = finalUrl.match(/target\.com\/p\/([^/]+)\/-\//i);
+    if (targetMatch) {
+      extracted = targetMatch[1].replace(/-/g, " ").trim();
+    }
+  }
+
+  // JB Hi-Fi: /products/category/product-name
+  if (!extracted) {
+    const jbMatch = finalUrl.match(/jbhifi\.com\.au\/products\/[^/]+\/([^?]+)/i);
+    if (jbMatch) {
+      extracted = jbMatch[1].replace(/-/g, " ").trim();
+    }
+  }
+
   if (extracted && extracted.length > 3) {
     console.log(`[URL resolve] extracted from URL: "${extracted}"`);
     return extracted;
@@ -135,11 +168,13 @@ async function resolveProductUrl(url: string): Promise<string> {
  */
 productRoutes.post("/search", async (c) => {
   const startTime = Date.now();
-  const { query } = await c.req.json<{ query: string }>();
+  const { query, region } = await c.req.json<{ query: string; region?: string }>();
 
   if (!query || typeof query !== "string" || query.trim().length < 2) {
     return c.json({ error: "Query must be at least 2 characters" }, 400);
   }
+
+  const regionConfig = getRegionConfig(region);
 
   let trimmedQuery = query.trim();
 
@@ -153,8 +188,8 @@ productRoutes.post("/search", async (c) => {
   }
 
   try {
-    // Step 1: Get current prices across retailers (Perplexity)
-    const priceSearch = await searchPrices(trimmedQuery);
+    // Step 1: Get current prices across retailers (Perplexity, region-aware)
+    const priceSearch = await searchPrices(trimmedQuery, regionConfig.code);
 
     // Step 2: Get launch intelligence (Perplexity, cached 7 days)
     const productCycle = findProductCycle(trimmedQuery);
@@ -168,9 +203,9 @@ productRoutes.post("/search", async (c) => {
     // TODO: Extract ASIN from Amazon URL or Keepa search
     const keepaHistory = null; // Will wire up when Keepa key is available
 
-    // Step 4: Get next sale event
+    // Step 4: Get next sale event (region-aware)
     const currentMonth = new Date().getMonth() + 1;
-    const nextSale = getNextSaleEvent(currentMonth);
+    const nextSale = getNextSaleEvent(currentMonth, regionConfig.code);
 
     // Step 5: Generate verdict (Gemini)
     const verdictInput: VerdictInput = {
@@ -220,6 +255,7 @@ productRoutes.post("/search", async (c) => {
             lastLaunch: "See launch intel",
           }
         : undefined,
+      region: regionConfig.code,
     };
 
     const verdict = await generateVerdict(verdictInput);
@@ -256,6 +292,11 @@ productRoutes.post("/search", async (c) => {
         ...(priceSearch.citations || []),
         ...(launchIntel?.citations || []),
       ],
+      region: {
+        code: regionConfig.code,
+        currency: regionConfig.currency,
+        currencySymbol: regionConfig.currencySymbol,
+      },
       _meta: {
         latencyMs: Date.now() - startTime,
         cached: false,
@@ -274,7 +315,20 @@ productRoutes.post("/search", async (c) => {
  * Returns upcoming sale events.
  */
 productRoutes.get("/sale-calendar", (c) => {
+  const region = c.req.query("region");
   const currentMonth = new Date().getMonth() + 1;
-  const nextSale = getNextSaleEvent(currentMonth);
-  return c.json({ currentMonth, nextSale });
+  const nextSale = getNextSaleEvent(currentMonth, region);
+  return c.json({ currentMonth, region: region || "US", nextSale });
+});
+
+/**
+ * GET /v1/products/regions
+ * Returns list of supported regions.
+ */
+productRoutes.get("/regions", (c) => {
+  const regions = getSupportedRegions().map((code) => {
+    const rc = getRegionConfig(code);
+    return { code: rc.code, name: rc.name, currency: rc.currency, currencySymbol: rc.currencySymbol };
+  });
+  return c.json({ regions });
 });
