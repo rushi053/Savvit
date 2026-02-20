@@ -246,6 +246,31 @@ export function formatPrice(price: number, region: RegionConfig): string {
  * Check if a retailer is in our curated trusted list for a region.
  * Fuzzy matches against region retailers + searchUrls keys.
  */
+/**
+ * Get retailer name → domain mapping for a region.
+ * Used to make Perplexity actually check each retailer's website.
+ */
+export function getRetailerDomains(region: RegionConfig): string {
+  // Extract domains from searchUrls — deduplicate by retailer name
+  const seen = new Set<string>();
+  const pairs: string[] = [];
+  for (const [key, fn] of Object.entries(region.searchUrls)) {
+    const name = region.retailers.find((r) => r.toLowerCase() === key || r.toLowerCase().includes(key) || key.includes(r.toLowerCase()));
+    const displayName = name || key;
+    if (seen.has(displayName.toLowerCase())) continue;
+    seen.add(displayName.toLowerCase());
+    // Extract domain from the URL builder
+    try {
+      const url = fn("test");
+      const domain = new URL(url).hostname.replace("www.", "");
+      pairs.push(`${displayName} (${domain})`);
+    } catch {
+      pairs.push(displayName);
+    }
+  }
+  return pairs.join(", ");
+}
+
 export function isTrustedRetailer(retailer: string, region: RegionConfig): boolean {
   const key = retailer.toLowerCase().trim();
   // Check against retailer list

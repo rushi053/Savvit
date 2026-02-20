@@ -6,7 +6,7 @@
  */
 
 import { getCached, setCache, CACHE_TTL } from "../utils/cache.js";
-import { RegionConfig, getRegionConfig, getRetailerSearchUrl, isTrustedRetailer } from "../data/region-config.js";
+import { RegionConfig, getRegionConfig, getRetailerSearchUrl, isTrustedRetailer, getRetailerDomains } from "../data/region-config.js";
 
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY || "";
 const SONAR_MODEL = "sonar";
@@ -172,11 +172,13 @@ export async function searchPrices(query: string, region?: string, sourceUrl?: s
   if (sourceRetailer) {
     console.log(`[perplexity] source retailer detected: ${sourceRetailer} from ${sourceUrl}`);
   }
-  const retailerList = regionConfig.retailers.join(", ");
+  const retailerDomains = getRetailerDomains(regionConfig);
 
   const systemPrompt = `You are a price research assistant for ${regionConfig.name} e-commerce. Return ONLY valid JSON.
 
-Your job: Find the current price of a product across major ${regionConfig.name} retailers.
+Your job: Find the current price of a product by checking EACH of these retailer websites individually: ${retailerDomains}
+
+You MUST check each retailer's website. Do not skip any — if a retailer sells the product, include their price.
 
 Return this exact JSON structure:
 {
@@ -196,13 +198,10 @@ Return this exact JSON structure:
   "summary": "1-2 sentence summary of pricing landscape"
 }
 
-Retailers to check: ${retailerList}, and any other major ${regionConfig.name} retailer.
-
 Rules:
 - Prices in ${regionConfig.currency} (integer, no decimals)
-- Only include retailers that actually sell this product in ${regionConfig.name}
+- Check EVERY retailer listed above — only exclude if they genuinely don't sell the product
 - Include any ongoing offers, bank discounts, bundle deals in the "offers" field
-- If a retailer doesn't have the product, don't include it
 - Sort prices low to high`;
 
   // If query contains an ASIN or item ID, tell Perplexity to look it up
@@ -216,7 +215,7 @@ Rules:
   } else if (sourceRetailer) {
     userMessage = `Find the current price of "${query}" across all major ${regionConfig.name} retailers. IMPORTANT: The user found this product on ${sourceRetailer}, so you MUST include ${sourceRetailer}'s price. Also check ${regionConfig.retailers.filter(r => r.toLowerCase() !== sourceRetailer.toLowerCase()).join(', ')}. Include any ongoing offers or discounts.`;
   } else {
-    userMessage = `Find the current price of "${query}" across all major ${regionConfig.name} retailers. Include any ongoing offers or discounts.`;
+    userMessage = `Find the current price of "${query}" in ${regionConfig.name}. Check EACH retailer individually: ${retailerDomains}. Visit each website and report their current price. Include any ongoing offers or discounts.`;
   }
 
   const response = await fetch("https://api.perplexity.ai/chat/completions", {
