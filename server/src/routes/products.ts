@@ -63,12 +63,20 @@ async function resolveProductUrl(url: string): Promise<string> {
   let extracted: string | null = null;
 
   // Amazon: /Product-Name-Here/dp/ASIN
-  const amazonMatch = finalUrl.match(/amazon\.\w+(?:\.\w+)?\/([^/]+)\/dp\//i);
+  const amazonMatch = finalUrl.match(/amazon\.\w+(?:\.\w+)?\/([^/]+)\/dp\/([A-Z0-9]{10})/i);
   if (amazonMatch) {
-    extracted = amazonMatch[1]
+    const slug = amazonMatch[1]
       .replace(/-/g, " ")
       .replace(/\b\w/g, (c) => c) // keep original case
       .trim();
+    const asin = amazonMatch[2];
+    // Include ASIN so Perplexity can identify the exact product
+    if (slug.length > 5 && slug !== "/" && !slug.includes("amazon")) {
+      extracted = `${slug} (Amazon ASIN ${asin})`;
+    } else {
+      // Slug is useless (just "dp" or too short) — use ASIN only
+      extracted = `Amazon ASIN ${asin}`;
+    }
   }
 
   // Flipkart: /product-name/p/itm...

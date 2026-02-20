@@ -153,10 +153,16 @@ Rules:
 - Sort prices low to high`;
 
   // If query contains an ASIN or item ID, tell Perplexity to look it up
-  const isASINQuery = /Amazon ASIN [A-Z0-9]{10}/i.test(query) || /Flipkart item /i.test(query);
-  const userMessage = isASINQuery
-    ? `Identify this product and find its current price across all major ${regionConfig.name} retailers: ${query}. First identify what the product is, then find prices. Include any ongoing offers or discounts.`
-    : `Find the current price of "${query}" across all major ${regionConfig.name} retailers. Include any ongoing offers or discounts.`;
+  const isASINQuery = /Amazon ASIN [A-Z0-9]{10}/i.test(query);
+  const isFlipkartQuery = /Flipkart item /i.test(query);
+  let userMessage: string;
+  if (isASINQuery) {
+    userMessage = `Identify this product and find its current price across all major ${regionConfig.name} retailers: ${query}. First identify what the product is from the ASIN, then find prices. IMPORTANT: You MUST include the Amazon price for this product since it came from Amazon. Also check ${regionConfig.retailers.filter(r => !r.toLowerCase().includes('amazon')).join(', ')}. Include any ongoing offers or discounts.`;
+  } else if (isFlipkartQuery) {
+    userMessage = `Identify this product and find its current price across all major ${regionConfig.name} retailers: ${query}. First identify what the product is, then find prices. IMPORTANT: You MUST include the Flipkart price. Include any ongoing offers or discounts.`;
+  } else {
+    userMessage = `Find the current price of "${query}" across all major ${regionConfig.name} retailers. Include any ongoing offers or discounts.`;
+  }
 
   const response = await fetch("https://api.perplexity.ai/chat/completions", {
     method: "POST",
