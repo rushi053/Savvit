@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "CURSOR-REDESIGN.md",
+                "file": "CURSOR-PROMPT.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "CURSOR-REDESIGN"
+              "title": "CURSOR-PROMPT"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "CURSOR-REDESIGN.md",
+                "file": "CURSOR-PROMPT.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for CURSOR-REDESIGN"
+              "title": "Backlinks for CURSOR-PROMPT"
             }
           },
           {
@@ -113,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "CURSOR-REDESIGN.md",
+                "file": "CURSOR-PROMPT.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from CURSOR-REDESIGN"
+              "title": "Outgoing links from CURSOR-PROMPT"
             }
           },
           {
@@ -156,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "CURSOR-REDESIGN.md",
+                "file": "CURSOR-PROMPT.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of CURSOR-REDESIGN"
+              "title": "Outline of CURSOR-PROMPT"
             }
           }
         ]
@@ -185,14 +185,14 @@
   },
   "active": "996b00e1e23dd75c",
   "lastOpenFiles": [
-    "assets/SAVVIT copy.png",
+    "price-data-apis.md",
     "assets/SAVVIT.png",
+    "assets/SAVVIT copy.png",
     "CURSOR-REDESIGN.md",
     "DESIGN-SPEC-v2.md",
     "assets",
     "untitled folder",
     "CURSOR-PROMPT.md",
-    "IOS-BUILD-GUIDE.md",
-    "price-data-apis.md"
+    "IOS-BUILD-GUIDE.md"
   ]
 }

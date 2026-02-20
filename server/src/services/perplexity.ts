@@ -22,6 +22,7 @@ interface PriceResult {
 
 interface PriceSearchResult {
   productName: string;
+  productImage: string | null;
   prices: PriceResult[];
   bestPrice: PriceResult | null;
   summary: string;
@@ -55,6 +56,7 @@ Your job: Find the current price of a product across major ${regionConfig.name} 
 Return this exact JSON structure:
 {
   "productName": "exact product name with variant/storage",
+  "productImage": "direct URL to a product image (png/jpg from retailer or manufacturer site, not a thumbnail — use the main product photo)",
   "prices": [
     {
       "retailer": "retailer name",

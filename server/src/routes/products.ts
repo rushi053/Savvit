@@ -264,6 +264,7 @@ productRoutes.post("/search", async (c) => {
     const response = {
       query: trimmedQuery,
       product: priceSearch.productName,
+      productImage: priceSearch.productImage || null,
       verdict: verdict.verdict,
       confidence: verdict.confidence,
       shortReason: verdict.shortReason,
