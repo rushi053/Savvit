@@ -173,40 +173,11 @@ export async function searchPrices(query: string, region?: string, sourceUrl?: s
     console.log(`[perplexity] source retailer detected: ${sourceRetailer} from ${sourceUrl}`);
   }
 
-  // First attempt
   let result = await _callPerplexityPrices(query, regionConfig, sourceRetailer);
-
-  // If we got fewer than 2 priced retailers, retry once and merge.
-  // Perplexity is non-deterministic — a second call often finds different retailers.
-  const pricedCount = result.prices.filter((p) => p.price > 0).length;
-  if (pricedCount < 2) {
-    console.log(`[perplexity] only ${pricedCount} priced retailers, retrying once...`);
-    try {
-      const retry = await _callPerplexityPrices(query, regionConfig, sourceRetailer);
-      // Merge: add any new retailers from retry that aren't already in result
-      for (const rp of retry.prices) {
-        if (rp.price <= 0) continue;
-        const exists = result.prices.some(
-          (ep) => ep.retailer.toLowerCase() === rp.retailer.toLowerCase()
-        );
-        if (!exists) {
-          result.prices.push(rp);
-        }
-      }
-      // Use retry's productName/image if first attempt didn't get one
-      if (!result.productName && retry.productName) result.productName = retry.productName;
-      if (!result.productImage && retry.productImage) result.productImage = retry.productImage;
-      // Merge citations
-      result.citations = [...new Set([...(result.citations || []), ...(retry.citations || [])])];
-    } catch (e) {
-      console.error("[perplexity] retry failed, using first result:", (e as Error).message);
-    }
-  }
 
   // === Post-processing (runs once on merged results) ===
 
-  // Filter out entries with no real price
-  result.prices = result.prices.filter((p) => p.price > 0);
+  // Clear bestPrice if it has no real price (will be recalculated below)
   if (result.bestPrice && result.bestPrice.price <= 0) {
     result.bestPrice = null;
   }
@@ -230,14 +201,22 @@ export async function searchPrices(query: string, region?: string, sourceUrl?: s
     }
   }
 
-  // Tag trusted/untrusted and sort: trusted first by price, untrusted after
+  // Tag trusted/untrusted
   for (const p of result.prices) {
     p.trusted = isTrustedRetailer(p.retailer, regionConfig);
   }
+  // Sort: trusted with price → untrusted with price → no price at bottom
   result.prices.sort((a, b) => {
-    if (a.trusted && !b.trusted) return -1;
-    if (!a.trusted && b.trusted) return 1;
-    return (a.price || Infinity) - (b.price || Infinity);
+    const aHasPrice = a.price > 0 ? 1 : 0;
+    const bHasPrice = b.price > 0 ? 1 : 0;
+    if (aHasPrice !== bHasPrice) return bHasPrice - aHasPrice; // priced first
+    if (aHasPrice && bHasPrice) {
+      // Both have prices: trusted first, then by price
+      if (a.trusted && !b.trusted) return -1;
+      if (!a.trusted && b.trusted) return 1;
+      return a.price - b.price;
+    }
+    return 0; // both zero — keep original order
   });
 
   // bestPrice = cheapest TRUSTED retailer
