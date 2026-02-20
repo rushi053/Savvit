@@ -280,12 +280,8 @@ Rules:
   result.citations = citations;
   result.productImage = productImage;
 
-  // Filter out useless entries: price 0 + out of stock
-  result.prices = result.prices.filter((p) => {
-    if (p.price <= 0 && p.inStock === false) return false;
-    if (p.price <= 0 && !p.offers) return false; // no price AND no offers = useless
-    return true;
-  });
+  // Filter out useless entries: no real price = not useful in "where to buy"
+  result.prices = result.prices.filter((p) => p.price > 0);
   // If bestPrice is 0, clear it
   if (result.bestPrice && result.bestPrice.price <= 0) {
     result.bestPrice = null;
