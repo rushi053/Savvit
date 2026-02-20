@@ -280,6 +280,17 @@ Rules:
   result.citations = citations;
   result.productImage = productImage;
 
+  // Filter out useless entries: price 0 + out of stock
+  result.prices = result.prices.filter((p) => {
+    if (p.price <= 0 && p.inStock === false) return false;
+    if (p.price <= 0 && !p.offers) return false; // no price AND no offers = useless
+    return true;
+  });
+  // If bestPrice is 0, clear it
+  if (result.bestPrice && result.bestPrice.price <= 0) {
+    result.bestPrice = null;
+  }
+
   // Replace LLM-hallucinated URLs with real search URLs (region-aware)
   // But preserve the source URL if it matches the source retailer
   const productName = result.productName || query;
