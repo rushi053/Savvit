@@ -6,7 +6,7 @@
  */
 
 import { getCached, setCache, CACHE_TTL } from "../utils/cache.js";
-import { RegionConfig, getRegionConfig, getRetailerSearchUrl } from "../data/region-config.js";
+import { RegionConfig, getRegionConfig, getRetailerSearchUrl, isTrustedRetailer } from "../data/region-config.js";
 
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY || "";
 const SONAR_MODEL = "sonar";
@@ -18,6 +18,7 @@ interface PriceResult {
   url?: string;
   offers?: string;
   inStock: boolean;
+  trusted?: boolean;
 }
 
 interface PriceSearchResult {
@@ -305,6 +306,29 @@ Rules:
     }
   }
 
+  // Tag each retailer as trusted or not, then sort: trusted first (by price), untrusted after
+  for (const p of result.prices) {
+    p.trusted = isTrustedRetailer(p.retailer, regionConfig);
+  }
+  result.prices.sort((a, b) => {
+    // Trusted first
+    if (a.trusted && !b.trusted) return -1;
+    if (!a.trusted && b.trusted) return 1;
+    // Within same trust level, sort by price (0 = unknown, push to end)
+    const pa = a.price || Infinity;
+    const pb = b.price || Infinity;
+    return pa - pb;
+  });
+
+  // bestPrice = cheapest TRUSTED retailer with a real price
+  const cheapestTrusted = result.prices.find((p) => p.trusted && p.price > 0);
+  if (cheapestTrusted) {
+    result.bestPrice = { ...cheapestTrusted };
+  } else if (result.prices.length > 0 && result.prices[0].price > 0) {
+    // Fallback: cheapest overall if no trusted retailer found
+    result.bestPrice = { ...result.prices[0] };
+  }
+
   // Guarantee source retailer is in the list (user came from that retailer's page)
   if (sourceRetailer && sourceUrl) {
     const hasSource = result.prices.some(
@@ -322,6 +346,7 @@ Rules:
         url: sourceUrl,
         offers: "Price available on retailer page",
         inStock: true,
+        trusted: true, // user was literally on their page
       });
     } else {
       // Source retailer exists — replace its URL with the actual source URL (direct link)

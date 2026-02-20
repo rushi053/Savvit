@@ -243,6 +243,27 @@ export function formatPrice(price: number, region: RegionConfig): string {
 }
 
 /**
+ * Check if a retailer is in our curated trusted list for a region.
+ * Fuzzy matches against region retailers + searchUrls keys.
+ */
+export function isTrustedRetailer(retailer: string, region: RegionConfig): boolean {
+  const key = retailer.toLowerCase().trim();
+  // Check against retailer list
+  if (region.retailers.some((r) => {
+    const rk = r.toLowerCase();
+    return rk === key || rk.includes(key) || key.includes(rk);
+  })) return true;
+  // Check against searchUrls keys (includes aliases like "bestbuy", "jb hifi")
+  if (Object.keys(region.searchUrls).some((k) => k === key || k.includes(key) || key.includes(k))) return true;
+  // Also trust manufacturer stores
+  const manufacturers = ["apple store", "apple", "samsung store", "samsung", "google store", "google",
+    "sony store", "sony", "microsoft store", "microsoft", "oneplus", "dell", "lenovo", "hp store",
+    "dyson", "bose", "nintendo", "playstation"];
+  if (manufacturers.some((m) => key.includes(m) || m.includes(key))) return true;
+  return false;
+}
+
+/**
  * Build a search URL for a retailer in a given region.
  * Falls back to Google search if retailer not recognized.
  */
