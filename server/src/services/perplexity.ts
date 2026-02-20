@@ -111,14 +111,66 @@ function pickBestProductImage(
 }
 
 /**
- * Search for current prices across retailers (region-aware).
+ * Detect which retailer a URL belongs to (returns display name or null).
  */
-export async function searchPrices(query: string, region?: string): Promise<PriceSearchResult> {
+function detectRetailerFromUrl(url: string): string | null {
+  const u = url.toLowerCase();
+  const patterns: [RegExp | string, string][] = [
+    ["amazon.in", "Amazon India"],
+    ["amazon.co.uk", "Amazon UK"],
+    ["amazon.de", "Amazon Germany"],
+    ["amazon.co.jp", "Amazon Japan"],
+    ["amazon.ca", "Amazon Canada"],
+    ["amazon.com.au", "Amazon Australia"],
+    ["amazon.fr", "Amazon France"],
+    ["amazon.com", "Amazon"],
+    ["flipkart.com", "Flipkart"],
+    ["croma.com", "Croma"],
+    ["reliancedigital.in", "Reliance Digital"],
+    ["vijaysales.com", "Vijay Sales"],
+    ["tatacliq.com", "Tata Cliq"],
+    ["bestbuy.com", "Best Buy"],
+    ["walmart.com", "Walmart"],
+    ["target.com", "Target"],
+    ["bhphotovideo.com", "B&H Photo"],
+    ["costco.com", "Costco"],
+    ["newegg.com", "Newegg"],
+    ["jbhifi.com.au", "JB Hi-Fi"],
+    ["currys.co.uk", "Currys"],
+    ["argos.co.uk", "Argos"],
+    ["mediamarkt", "MediaMarkt"],
+    ["saturn.de", "Saturn"],
+    ["otto.de", "Otto"],
+    ["canadacomputers.com", "Canada Computers"],
+    ["ldlc.com", "LDLC"],
+    ["fnac.com", "Fnac"],
+    ["darty.com", "Darty"],
+    ["biccamera.com", "Bic Camera"],
+    ["yodobashi.com", "Yodobashi"],
+    ["apple.com", "Apple Store"],
+    ["samsung.com", "Samsung Store"],
+    ["store.google.com", "Google Store"],
+  ];
+  for (const [pattern, name] of patterns) {
+    if (u.includes(typeof pattern === "string" ? pattern : "")) return name;
+  }
+  return null;
+}
+
+/**
+ * Search for current prices across retailers (region-aware).
+ * If sourceUrl is provided, that retailer is guaranteed in results.
+ */
+export async function searchPrices(query: string, region?: string, sourceUrl?: string): Promise<PriceSearchResult> {
   const regionConfig = getRegionConfig(region);
   const cacheKey = `prices:${regionConfig.code}:${query.toLowerCase().trim()}`;
   const cached = getCached<PriceSearchResult>(cacheKey);
   if (cached) return cached;
 
+  const sourceRetailer = sourceUrl ? detectRetailerFromUrl(sourceUrl) : null;
+  if (sourceRetailer) {
+    console.log(`[perplexity] source retailer detected: ${sourceRetailer} from ${sourceUrl}`);
+  }
   const retailerList = regionConfig.retailers.join(", ");
 
   const systemPrompt = `You are a price research assistant for ${regionConfig.name} e-commerce. Return ONLY valid JSON.
@@ -160,6 +212,8 @@ Rules:
     userMessage = `Identify this product and find its current price across all major ${regionConfig.name} retailers: ${query}. First identify what the product is from the ASIN, then find prices. IMPORTANT: You MUST include the Amazon price for this product since it came from Amazon. Also check ${regionConfig.retailers.filter(r => !r.toLowerCase().includes('amazon')).join(', ')}. Include any ongoing offers or discounts.`;
   } else if (isFlipkartQuery) {
     userMessage = `Identify this product and find its current price across all major ${regionConfig.name} retailers: ${query}. First identify what the product is, then find prices. IMPORTANT: You MUST include the Flipkart price. Include any ongoing offers or discounts.`;
+  } else if (sourceRetailer) {
+    userMessage = `Find the current price of "${query}" across all major ${regionConfig.name} retailers. IMPORTANT: The user found this product on ${sourceRetailer}, so you MUST include ${sourceRetailer}'s price. Also check ${regionConfig.retailers.filter(r => r.toLowerCase() !== sourceRetailer.toLowerCase()).join(', ')}. Include any ongoing offers or discounts.`;
   } else {
     userMessage = `Find the current price of "${query}" across all major ${regionConfig.name} retailers. Include any ongoing offers or discounts.`;
   }
@@ -227,12 +281,58 @@ Rules:
   result.productImage = productImage;
 
   // Replace LLM-hallucinated URLs with real search URLs (region-aware)
+  // But preserve the source URL if it matches the source retailer
   const productName = result.productName || query;
   for (const price of result.prices) {
     price.url = getRetailerSearchUrl(price.retailer, productName, regionConfig);
   }
   if (result.bestPrice) {
     result.bestPrice.url = getRetailerSearchUrl(result.bestPrice.retailer, productName, regionConfig);
+  }
+  // Override source retailer's URL with the actual direct link
+  if (sourceRetailer && sourceUrl) {
+    for (const p of result.prices) {
+      if (p.retailer.toLowerCase().includes(sourceRetailer.toLowerCase()) ||
+          sourceRetailer.toLowerCase().includes(p.retailer.toLowerCase())) {
+        p.url = sourceUrl;
+        break;
+      }
+    }
+    if (result.bestPrice &&
+        (result.bestPrice.retailer.toLowerCase().includes(sourceRetailer.toLowerCase()) ||
+         sourceRetailer.toLowerCase().includes(result.bestPrice.retailer.toLowerCase()))) {
+      result.bestPrice.url = sourceUrl;
+    }
+  }
+
+  // Guarantee source retailer is in the list (user came from that retailer's page)
+  if (sourceRetailer && sourceUrl) {
+    const hasSource = result.prices.some(
+      (p) => p.retailer.toLowerCase().includes(sourceRetailer.toLowerCase()) ||
+             sourceRetailer.toLowerCase().includes(p.retailer.toLowerCase())
+    );
+    if (!hasSource) {
+      console.log(`[perplexity] source retailer "${sourceRetailer}" missing from results, adding with source URL`);
+      // Add the source retailer — we know they sell it (user was on their page),
+      // but we don't have the price, so mark it with price 0 and a note
+      result.prices.push({
+        retailer: sourceRetailer,
+        price: 0,
+        currency: regionConfig.currency,
+        url: sourceUrl,
+        offers: "Price available on retailer page",
+        inStock: true,
+      });
+    } else {
+      // Source retailer exists — replace its URL with the actual source URL (direct link)
+      for (const p of result.prices) {
+        if (p.retailer.toLowerCase().includes(sourceRetailer.toLowerCase()) ||
+            sourceRetailer.toLowerCase().includes(p.retailer.toLowerCase())) {
+          p.url = sourceUrl;
+          break;
+        }
+      }
+    }
   }
 
   // Only cache if we got meaningful results

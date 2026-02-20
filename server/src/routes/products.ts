@@ -176,7 +176,7 @@ async function resolveProductUrl(url: string): Promise<string> {
  */
 productRoutes.post("/search", async (c) => {
   const startTime = Date.now();
-  const { query, region } = await c.req.json<{ query: string; region?: string }>();
+  const { query, region, sourceUrl } = await c.req.json<{ query: string; region?: string; sourceUrl?: string }>();
 
   if (!query || typeof query !== "string" || query.trim().length < 2) {
     return c.json({ error: "Query must be at least 2 characters" }, 400);
@@ -197,7 +197,8 @@ productRoutes.post("/search", async (c) => {
 
   try {
     // Step 1: Get current prices across retailers (Perplexity, region-aware)
-    const priceSearch = await searchPrices(trimmedQuery, regionConfig.code);
+    // Pass sourceUrl so the source retailer is guaranteed in results
+    const priceSearch = await searchPrices(trimmedQuery, regionConfig.code, sourceUrl);
 
     // Step 2: Get launch intelligence (Perplexity, cached 7 days)
     const productCycle = findProductCycle(trimmedQuery);
