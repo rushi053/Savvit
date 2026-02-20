@@ -39,6 +39,44 @@ interface LaunchIntel {
 }
 
 /**
+ * Pick the best product image from Perplexity's returned images.
+ * Prefers non-YouTube, non-video images from retailer/manufacturer sites.
+ */
+function pickBestProductImage(
+  images: Array<{ image_url: string; origin_url?: string; title?: string }>
+): string | null {
+  if (!images || images.length === 0) return null;
+
+  // Score each image — higher is better
+  const scored = images.map((img) => {
+    let score = 0;
+    const url = img.image_url.toLowerCase();
+    const origin = (img.origin_url || "").toLowerCase();
+
+    // Penalize YouTube thumbnails
+    if (url.includes("ytimg.com") || origin.includes("youtube.com")) score -= 10;
+    // Penalize video sites
+    if (origin.includes("tiktok") || origin.includes("vimeo")) score -= 10;
+
+    // Prefer retailer/manufacturer sites
+    const goodSources = ["amazon", "flipkart", "apple.com", "samsung.com", "bestbuy", "walmart",
+      "croma", "jbhifi", "currys", "target.com", "gsmarena", "notebookcheck"];
+    if (goodSources.some((s) => origin.includes(s))) score += 5;
+
+    // Prefer .png and .jpg over other formats
+    if (url.endsWith(".png") || url.endsWith(".jpg") || url.endsWith(".jpeg") || url.endsWith(".webp")) score += 2;
+
+    // Prefer images with product-related titles
+    if (img.title && !img.title.toLowerCase().includes("video") && !img.title.toLowerCase().includes("review")) score += 1;
+
+    return { ...img, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0]?.image_url || null;
+}
+
+/**
  * Search for current prices across retailers (region-aware).
  */
 export async function searchPrices(query: string, region?: string): Promise<PriceSearchResult> {
@@ -56,7 +94,7 @@ Your job: Find the current price of a product across major ${regionConfig.name} 
 Return this exact JSON structure:
 {
   "productName": "exact product name with variant/storage",
-  "productImage": "direct URL to a product image (png/jpg from retailer or manufacturer site, not a thumbnail — use the main product photo)",
+  "productImage": "leave empty string, will be auto-generated",
   "prices": [
     {
       "retailer": "retailer name",
@@ -99,6 +137,7 @@ Rules:
         { role: "user", content: userMessage },
       ],
       temperature: 0.1,
+      return_images: true,
     }),
   });
 
@@ -109,6 +148,11 @@ Rules:
   const data = await response.json();
   const content = data.choices?.[0]?.message?.content || "";
   const citations = data.citations || [];
+
+  // Extract best product image from Perplexity's returned images
+  const images: Array<{ image_url: string; origin_url?: string; title?: string }> = data.images || [];
+  // Prefer images NOT from YouTube, prefer retailer/manufacturer sites
+  const productImage = pickBestProductImage(images);
 
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
@@ -140,6 +184,7 @@ Rules:
       : parseInt(String(result.bestPrice.price).replace(/[^0-9]/g, ""), 10) || 0;
   }
   result.citations = citations;
+  result.productImage = productImage;
 
   // Replace LLM-hallucinated URLs with real search URLs (region-aware)
   const productName = result.productName || query;
