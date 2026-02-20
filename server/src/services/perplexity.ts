@@ -342,6 +342,132 @@ Rules:
   return result;
 }
 
+// ── Deals & Coupons Search ──────────────────────────────────────────
+
+interface Deal {
+  type: "coupon" | "bank_offer" | "cashback" | "exchange" | "student" | "bundle" | "sale" | "other";
+  title: string;
+  description: string;
+  code?: string;        // coupon code if applicable
+  retailer?: string;    // which retailer this applies to
+  discount?: string;    // e.g. "10% off", "₹5,000 off", "$50 off"
+  validUntil?: string;  // expiry if known
+  source?: string;      // where this deal was found
+}
+
+interface DealsResult {
+  deals: Deal[];
+  summary: string;
+  citations: string[];
+}
+
+/**
+ * Search for active coupons, bank offers, cashback deals, exchange offers,
+ * student discounts, and bundle deals for a product — region-aware.
+ */
+export async function searchDeals(query: string, region?: string): Promise<DealsResult> {
+  const regionConfig = getRegionConfig(region);
+  const cacheKey = `deals:${regionConfig.code}:${query.toLowerCase().trim()}`;
+  const cached = getCached<DealsResult>(cacheKey);
+  if (cached) return cached;
+
+  // Region-specific deal types to search for
+  const regionDealHints: Record<string, string> = {
+    IN: "bank card offers (HDFC, ICICI, SBI, Axis, Kotak, AMEX), No-Cost EMI, exchange/trade-in offers, Flipkart SuperCoins, Amazon Pay cashback, Croma gift card offers",
+    US: "promo codes, credit card cashback (Chase, Amex, Citi), trade-in programs (Apple, Best Buy, Amazon), student/military/first responder discounts, price match guarantees, Honey/Rakuten cashback",
+    UK: "voucher codes, cashback (TopCashback, Quidco), student discount (UNiDAYS, Student Beans), trade-in offers, Currys price promise",
+    DE: "Gutscheincodes, Cashback (Shoop, iGraal), trade-in programs, MediaMarkt/Saturn club offers, student discounts",
+    CA: "promo codes, Aeroplan/PC Optimum points, trade-in offers, student discounts, price match guarantees, Rakuten cashback",
+    AU: "promo codes, cashback (ShopBack, Cashrewards), trade-in programs, student discounts (UNiDAYS), JB Hi-Fi price match",
+    JP: "クーポン (coupons), point programs (Rakuten Points, T-Points, d-Points), trade-in offers, student discounts",
+    FR: "codes promo, cashback (iGraal, Poulpeo), offres de reprise (trade-in), remises étudiantes, offres de remboursement",
+  };
+
+  const dealHints = regionDealHints[regionConfig.code] || "promo codes, cashback, trade-in offers, student discounts";
+
+  const systemPrompt = `You are a deal-finding assistant for ${regionConfig.name}. Return ONLY valid JSON.
+
+Your job: Find ALL active coupons, discount codes, bank offers, cashback deals, exchange/trade-in offers, student discounts, and bundle deals for a specific product.
+
+Return this exact JSON structure:
+{
+  "deals": [
+    {
+      "type": "coupon|bank_offer|cashback|exchange|student|bundle|sale|other",
+      "title": "Short title of the deal",
+      "description": "Details — what the user gets and how to claim it",
+      "code": "COUPON_CODE or null if not a code-based deal",
+      "retailer": "Which retailer this deal is on",
+      "discount": "e.g. 10% off, ${regionConfig.currencySymbol}5000 off, 5% cashback",
+      "validUntil": "Expiry date if known, or null",
+      "source": "Where you found this info"
+    }
+  ],
+  "summary": "1-2 sentence overview of the best deals available right now"
+}
+
+Types of deals to look for in ${regionConfig.name}:
+${dealHints}
+
+Rules:
+- Only include CURRENTLY ACTIVE deals (not expired)
+- Include the coupon/promo code when available
+- Be specific about conditions (min purchase, specific cards, etc.)
+- If no deals found, return empty deals array with summary "No active deals found"
+- Sort by value — biggest savings first
+- Include deals from ALL major ${regionConfig.name} retailers that sell this product`;
+
+  const userMessage = `Find all active coupons, promo codes, bank offers, cashback deals, exchange offers, and discounts for "${query}" in ${regionConfig.name}. Check all major retailers: ${regionConfig.retailers.join(", ")}. Include any active sale events.`;
+
+  const response = await fetch("https://api.perplexity.ai/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: SONAR_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      temperature: 0.1,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Perplexity API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content || "";
+  const citations = data.citations || [];
+
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    console.error("[perplexity:deals] No JSON in response:", content.substring(0, 300));
+    return { deals: [], summary: "Could not find deals information", citations };
+  }
+
+  let result: DealsResult;
+  try {
+    result = JSON.parse(jsonMatch[0]);
+  } catch {
+    console.error("[perplexity:deals] JSON parse failed");
+    return { deals: [], summary: "Could not parse deals information", citations };
+  }
+
+  if (!Array.isArray(result.deals)) result.deals = [];
+  result.citations = citations;
+
+  // Cache deals for 6 hours (same as prices — deals change frequently)
+  if (result.deals.length > 0) {
+    setCache(cacheKey, result, CACHE_TTL.PRICES);
+  }
+
+  return result;
+}
+
 /**
  * Search for upcoming product launches and news.
  */

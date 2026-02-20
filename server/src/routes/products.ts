@@ -4,7 +4,7 @@
  */
 
 import { Hono } from "hono";
-import { searchPrices, searchLaunchIntel } from "../services/perplexity.js";
+import { searchPrices, searchLaunchIntel, searchDeals } from "../services/perplexity.js";
 import { getAmazonPriceHistory } from "../services/keepa.js";
 import { generateVerdict, VerdictInput } from "../services/gemini.js";
 import { getNextSaleEvent } from "../data/sale-calendar.js";
@@ -196,16 +196,16 @@ productRoutes.post("/search", async (c) => {
   }
 
   try {
-    // Step 1: Get current prices across retailers (Perplexity, region-aware)
-    // Pass sourceUrl so the source retailer is guaranteed in results
-    const priceSearch = await searchPrices(trimmedQuery, regionConfig.code, sourceUrl);
-
-    // Step 2: Get launch intelligence (Perplexity, cached 7 days)
+    // Step 1+2+2b: Run price search, launch intel, and deals in PARALLEL
     const productCycle = findProductCycle(trimmedQuery);
-    const launchIntel = await searchLaunchIntel(
-      trimmedQuery,
-      productCycle?.productLine || "general"
-    ).catch(() => null);
+    const [priceSearch, launchIntel, dealsResult] = await Promise.all([
+      // Prices (with source retailer guarantee)
+      searchPrices(trimmedQuery, regionConfig.code, sourceUrl),
+      // Launch intel
+      searchLaunchIntel(trimmedQuery, productCycle?.productLine || "general").catch(() => null),
+      // Deals & coupons
+      searchDeals(trimmedQuery, regionConfig.code).catch(() => ({ deals: [], summary: "Could not fetch deals", citations: [] as string[] })),
+    ]);
 
     // Step 3: Get Amazon price history (Keepa) — if we can find an ASIN
     // For MVP, we skip Keepa if no key configured
@@ -265,6 +265,15 @@ productRoutes.post("/search", async (c) => {
           }
         : undefined,
       region: regionConfig.code,
+      deals: dealsResult.deals.length > 0
+        ? dealsResult.deals.map((d) => ({
+            type: d.type,
+            title: d.title,
+            discount: d.discount,
+            retailer: d.retailer,
+            code: d.code,
+          }))
+        : undefined,
     };
 
     const verdict = await generateVerdict(verdictInput);
@@ -298,9 +307,14 @@ productRoutes.post("/search", async (c) => {
             avg90d: keepaHistory.avg90d,
           }
         : null,
+      deals: dealsResult.deals.length > 0
+        ? dealsResult.deals
+        : null,
+      dealsSummary: dealsResult.deals.length > 0 ? dealsResult.summary : null,
       citations: [
         ...(priceSearch.citations || []),
         ...(launchIntel?.citations || []),
+        ...(dealsResult.citations || []),
       ],
       region: {
         code: regionConfig.code,

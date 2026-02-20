@@ -38,6 +38,13 @@ export interface VerdictInput {
     lastLaunch: string;
   };
   region?: string;
+  deals?: Array<{
+    type: string;
+    title: string;
+    discount?: string;
+    retailer?: string;
+    code?: string;
+  }>;
 }
 
 export interface Verdict {
@@ -50,6 +57,7 @@ export interface Verdict {
     estimatedSavings: string | null;
     bestTimeToBuy: string | null;
     launchAlert: string | null;
+    topDeal: string | null;
   };
   shortReason: string; // One-line for free users
 }
@@ -91,6 +99,13 @@ ${
 }
 
 ${
+  input.deals && input.deals.length > 0
+    ? `ACTIVE DEALS & COUPONS:
+${input.deals.map((d) => `- [${d.type.toUpperCase()}] ${d.title}${d.discount ? ` — ${d.discount}` : ""}${d.retailer ? ` (${d.retailer})` : ""}${d.code ? ` | Code: ${d.code}` : ""}`).join("\n")}`
+    : "DEALS & COUPONS: None found"
+}
+
+${
   input.nextSaleEvent
     ? `NEXT SALE EVENT:
 - ${input.nextSaleEvent.name} — ${input.nextSaleEvent.date}
@@ -108,18 +123,21 @@ Return ONLY valid JSON:
     "waitReason": "Why waiting is smarter (or null if BUY_NOW)",
     "estimatedSavings": "How much they could save by waiting (e.g. '${sym}8,000-12,000') or null",
     "bestTimeToBuy": "When to buy for best price or null",
-    "launchAlert": "Info about upcoming new model (or null)"
+    "launchAlert": "Info about upcoming new model (or null)",
+    "topDeal": "The single best deal/coupon to highlight (or null if no deals)"
   },
   "shortReason": "One concise line (max 60 chars) for the verdict badge"
 }
 
 DECISION RULES:
-- BUY_NOW: Price is at/near historical low, no major sale coming within 30 days, no new model within 60 days
+- BUY_NOW: Price is at/near historical low, no major sale coming within 30 days, no new model within 60 days. Strong active deals/coupons can tip toward BUY_NOW.
 - WAIT: Major sale coming within 60 days, OR new model launching within 90 days, OR price is significantly above average
 - DONT_BUY: Price is at historical high, OR new model launching very soon (<30 days), OR clear price gouging
 - When unsure, lean WAIT — it's safer advice
 - Be specific with savings estimates and dates — use ${sym} for currency
-- shortReason should be punchy: "Near all-time low" or "New model in 5 weeks" or "Price spike — avoid"`;
+- Factor in active deals/coupons — if a bank offer or coupon effectively lowers the price significantly, mention it in your reasoning
+- shortReason should be punchy: "Near all-time low" or "New model in 5 weeks" or "Price spike — avoid"
+- topDeal: highlight the single best deal if any exist (e.g. "Use code SAVE10 on Amazon for 10% off" or "HDFC card: extra ${sym}5,000 off on Flipkart")`;
 
   const response = await fetch(API_URL, {
     method: "POST",
