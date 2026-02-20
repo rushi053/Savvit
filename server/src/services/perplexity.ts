@@ -172,6 +172,123 @@ export async function searchPrices(query: string, region?: string, sourceUrl?: s
   if (sourceRetailer) {
     console.log(`[perplexity] source retailer detected: ${sourceRetailer} from ${sourceUrl}`);
   }
+
+  // First attempt
+  let result = await _callPerplexityPrices(query, regionConfig, sourceRetailer);
+
+  // If we got fewer than 2 priced retailers, retry once and merge.
+  // Perplexity is non-deterministic — a second call often finds different retailers.
+  const pricedCount = result.prices.filter((p) => p.price > 0).length;
+  if (pricedCount < 2) {
+    console.log(`[perplexity] only ${pricedCount} priced retailers, retrying once...`);
+    try {
+      const retry = await _callPerplexityPrices(query, regionConfig, sourceRetailer);
+      // Merge: add any new retailers from retry that aren't already in result
+      for (const rp of retry.prices) {
+        if (rp.price <= 0) continue;
+        const exists = result.prices.some(
+          (ep) => ep.retailer.toLowerCase() === rp.retailer.toLowerCase()
+        );
+        if (!exists) {
+          result.prices.push(rp);
+        }
+      }
+      // Use retry's productName/image if first attempt didn't get one
+      if (!result.productName && retry.productName) result.productName = retry.productName;
+      if (!result.productImage && retry.productImage) result.productImage = retry.productImage;
+      // Merge citations
+      result.citations = [...new Set([...(result.citations || []), ...(retry.citations || [])])];
+    } catch (e) {
+      console.error("[perplexity] retry failed, using first result:", (e as Error).message);
+    }
+  }
+
+  // === Post-processing (runs once on merged results) ===
+
+  // Filter out entries with no real price
+  result.prices = result.prices.filter((p) => p.price > 0);
+  if (result.bestPrice && result.bestPrice.price <= 0) {
+    result.bestPrice = null;
+  }
+
+  // Replace LLM-hallucinated URLs with real retailer search URLs
+  const productName = result.productName || query;
+  for (const price of result.prices) {
+    price.url = getRetailerSearchUrl(price.retailer, productName, regionConfig);
+  }
+  if (result.bestPrice) {
+    result.bestPrice.url = getRetailerSearchUrl(result.bestPrice.retailer, productName, regionConfig);
+  }
+
+  // Override source retailer's URL with the actual direct link
+  if (sourceRetailer && sourceUrl) {
+    for (const p of result.prices) {
+      if (_retailerMatch(p.retailer, sourceRetailer)) { p.url = sourceUrl; break; }
+    }
+    if (result.bestPrice && _retailerMatch(result.bestPrice.retailer, sourceRetailer)) {
+      result.bestPrice.url = sourceUrl;
+    }
+  }
+
+  // Tag trusted/untrusted and sort: trusted first by price, untrusted after
+  for (const p of result.prices) {
+    p.trusted = isTrustedRetailer(p.retailer, regionConfig);
+  }
+  result.prices.sort((a, b) => {
+    if (a.trusted && !b.trusted) return -1;
+    if (!a.trusted && b.trusted) return 1;
+    return (a.price || Infinity) - (b.price || Infinity);
+  });
+
+  // bestPrice = cheapest TRUSTED retailer
+  const cheapestTrusted = result.prices.find((p) => p.trusted && p.price > 0);
+  if (cheapestTrusted) {
+    result.bestPrice = { ...cheapestTrusted };
+  } else if (result.prices.length > 0 && result.prices[0].price > 0) {
+    result.bestPrice = { ...result.prices[0] };
+  }
+
+  // Guarantee source retailer is in the list
+  if (sourceRetailer && sourceUrl) {
+    const hasSource = result.prices.some((p) => _retailerMatch(p.retailer, sourceRetailer));
+    if (!hasSource) {
+      console.log(`[perplexity] source retailer "${sourceRetailer}" missing, adding with source URL`);
+      result.prices.push({
+        retailer: sourceRetailer,
+        price: 0,
+        currency: regionConfig.currency,
+        url: sourceUrl,
+        offers: "Price available on retailer page",
+        inStock: true,
+        trusted: true,
+      });
+    } else {
+      // Ensure source retailer uses the direct URL
+      for (const p of result.prices) {
+        if (_retailerMatch(p.retailer, sourceRetailer)) { p.url = sourceUrl; break; }
+      }
+    }
+  }
+
+  // Cache good results
+  if (result.prices.length > 0 && result.prices.some((p) => p.price > 0)) {
+    setCache(cacheKey, result, CACHE_TTL.PRICES);
+  }
+  return result;
+}
+
+/** Helper: fuzzy-match retailer names */
+function _retailerMatch(a: string, b: string): boolean {
+  const al = a.toLowerCase(), bl = b.toLowerCase();
+  return al === bl || al.includes(bl) || bl.includes(al);
+}
+
+/** Core Perplexity price search call (no caching, no post-processing) */
+async function _callPerplexityPrices(
+  query: string,
+  regionConfig: RegionConfig,
+  sourceRetailer: string | null
+): Promise<PriceSearchResult> {
   const retailerDomains = getRetailerDomains(regionConfig);
 
   const systemPrompt = `You are a price research assistant for ${regionConfig.name} e-commerce. Return ONLY valid JSON.
@@ -205,7 +322,6 @@ Rules:
 - Include any ongoing offers, bank discounts, bundle deals in the "offers" field
 - Sort prices low to high`;
 
-  // If query contains an ASIN or item ID, tell Perplexity to look it up
   const isASINQuery = /Amazon ASIN [A-Z0-9]{10}/i.test(query);
   const isFlipkartQuery = /Flipkart item /i.test(query);
   let userMessage: string;
@@ -244,9 +360,7 @@ Rules:
   const content = data.choices?.[0]?.message?.content || "";
   const citations = data.citations || [];
 
-  // Extract best product image from Perplexity's returned images
   const images: Array<{ image_url: string; origin_url?: string; title?: string }> = data.images || [];
-  // Prefer images NOT from YouTube, prefer retailer/manufacturer sites
   const productImage = pickBestProductImage(images);
 
   const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -263,12 +377,8 @@ Rules:
     throw new Error("Could not parse price search response");
   }
 
-  // Defensive: ensure prices is an array with valid data
-  if (!Array.isArray(result.prices)) {
-    console.error("[perplexity] prices is not an array:", typeof result.prices);
-    result.prices = [];
-  }
-  // Ensure every price is a number
+  if (!Array.isArray(result.prices)) result.prices = [];
+  // Coerce prices to numbers
   result.prices = result.prices.map((p) => ({
     ...p,
     price: typeof p.price === "number" ? p.price : parseInt(String(p.price).replace(/[^0-9]/g, ""), 10) || 0,
@@ -281,96 +391,6 @@ Rules:
   result.citations = citations;
   result.productImage = productImage;
 
-  // Filter out useless entries: no real price = not useful in "where to buy"
-  result.prices = result.prices.filter((p) => p.price > 0);
-  // If bestPrice is 0, clear it
-  if (result.bestPrice && result.bestPrice.price <= 0) {
-    result.bestPrice = null;
-  }
-
-  // Replace LLM-hallucinated URLs with real search URLs (region-aware)
-  // But preserve the source URL if it matches the source retailer
-  const productName = result.productName || query;
-  for (const price of result.prices) {
-    price.url = getRetailerSearchUrl(price.retailer, productName, regionConfig);
-  }
-  if (result.bestPrice) {
-    result.bestPrice.url = getRetailerSearchUrl(result.bestPrice.retailer, productName, regionConfig);
-  }
-  // Override source retailer's URL with the actual direct link
-  if (sourceRetailer && sourceUrl) {
-    for (const p of result.prices) {
-      if (p.retailer.toLowerCase().includes(sourceRetailer.toLowerCase()) ||
-          sourceRetailer.toLowerCase().includes(p.retailer.toLowerCase())) {
-        p.url = sourceUrl;
-        break;
-      }
-    }
-    if (result.bestPrice &&
-        (result.bestPrice.retailer.toLowerCase().includes(sourceRetailer.toLowerCase()) ||
-         sourceRetailer.toLowerCase().includes(result.bestPrice.retailer.toLowerCase()))) {
-      result.bestPrice.url = sourceUrl;
-    }
-  }
-
-  // Tag each retailer as trusted or not, then sort: trusted first (by price), untrusted after
-  for (const p of result.prices) {
-    p.trusted = isTrustedRetailer(p.retailer, regionConfig);
-  }
-  result.prices.sort((a, b) => {
-    // Trusted first
-    if (a.trusted && !b.trusted) return -1;
-    if (!a.trusted && b.trusted) return 1;
-    // Within same trust level, sort by price (0 = unknown, push to end)
-    const pa = a.price || Infinity;
-    const pb = b.price || Infinity;
-    return pa - pb;
-  });
-
-  // bestPrice = cheapest TRUSTED retailer with a real price
-  const cheapestTrusted = result.prices.find((p) => p.trusted && p.price > 0);
-  if (cheapestTrusted) {
-    result.bestPrice = { ...cheapestTrusted };
-  } else if (result.prices.length > 0 && result.prices[0].price > 0) {
-    // Fallback: cheapest overall if no trusted retailer found
-    result.bestPrice = { ...result.prices[0] };
-  }
-
-  // Guarantee source retailer is in the list (user came from that retailer's page)
-  if (sourceRetailer && sourceUrl) {
-    const hasSource = result.prices.some(
-      (p) => p.retailer.toLowerCase().includes(sourceRetailer.toLowerCase()) ||
-             sourceRetailer.toLowerCase().includes(p.retailer.toLowerCase())
-    );
-    if (!hasSource) {
-      console.log(`[perplexity] source retailer "${sourceRetailer}" missing from results, adding with source URL`);
-      // Add the source retailer — we know they sell it (user was on their page),
-      // but we don't have the price, so mark it with price 0 and a note
-      result.prices.push({
-        retailer: sourceRetailer,
-        price: 0,
-        currency: regionConfig.currency,
-        url: sourceUrl,
-        offers: "Price available on retailer page",
-        inStock: true,
-        trusted: true, // user was literally on their page
-      });
-    } else {
-      // Source retailer exists — replace its URL with the actual source URL (direct link)
-      for (const p of result.prices) {
-        if (p.retailer.toLowerCase().includes(sourceRetailer.toLowerCase()) ||
-            sourceRetailer.toLowerCase().includes(p.retailer.toLowerCase())) {
-          p.url = sourceUrl;
-          break;
-        }
-      }
-    }
-  }
-
-  // Only cache if we got meaningful results
-  if (result.prices.length > 0 && result.prices.some((p) => p.price > 0)) {
-    setCache(cacheKey, result, CACHE_TTL.PRICES);
-  }
   return result;
 }
 
