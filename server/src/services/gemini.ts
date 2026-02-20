@@ -38,6 +38,7 @@ export interface VerdictInput {
     lastLaunch: string;
   };
   region?: string;
+  notAvailable?: boolean; // true when no retailers have the product (not launched / out of stock everywhere)
   deals?: Array<{
     type: string;
     title: string;
@@ -73,7 +74,9 @@ PRODUCT: ${input.productName}
 REGION: ${rc.name} (${rc.currency})
 
 CURRENT PRICES:
-${input.currentPrices.map((p) => `- ${p.retailer}: ${fp(p.price ?? 0)}${p.offers ? ` (${p.offers})` : ""}`).join("\n")}
+${input.notAvailable
+  ? "⚠️ NO RETAILERS FOUND — This product appears to be unavailable in this region. It may not have launched yet, or it may be sold out everywhere. Make this VERY clear in your verdict."
+  : input.currentPrices.map((p) => `- ${p.retailer}: ${fp(p.price ?? 0)}${p.offers ? ` (${p.offers})` : ""}`).join("\n")}
 
 BEST PRICE: ${input.bestPrice ? `${fp(input.bestPrice.price ?? 0)} on ${input.bestPrice.retailer}` : "Unknown"}
 

@@ -217,6 +217,7 @@ productRoutes.post("/search", async (c) => {
     const nextSale = getNextSaleEvent(currentMonth, regionConfig.code);
 
     // Step 5: Generate verdict (Gemini)
+    const noRetailersAvailable = priceSearch.prices.length === 0;
     const verdictInput: VerdictInput = {
       productName: priceSearch.productName || trimmedQuery,
       currentPrices: priceSearch.prices.map((p) => ({
@@ -224,6 +225,7 @@ productRoutes.post("/search", async (c) => {
         price: p.price,
         offers: p.offers,
       })),
+      notAvailable: noRetailersAvailable,
       bestPrice: priceSearch.bestPrice
         ? { retailer: priceSearch.bestPrice.retailer, price: priceSearch.bestPrice.price }
         : null,
