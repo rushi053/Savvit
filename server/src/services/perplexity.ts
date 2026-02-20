@@ -40,40 +40,74 @@ interface LaunchIntel {
 
 /**
  * Pick the best product image from Perplexity's returned images.
- * Prefers non-YouTube, non-video images from retailer/manufacturer sites.
+ * Aggressively filters for actual product photos on white/clean backgrounds.
  */
 function pickBestProductImage(
   images: Array<{ image_url: string; origin_url?: string; title?: string }>
 ): string | null {
   if (!images || images.length === 0) return null;
 
-  // Score each image — higher is better
   const scored = images.map((img) => {
     let score = 0;
     const url = img.image_url.toLowerCase();
     const origin = (img.origin_url || "").toLowerCase();
+    const title = (img.title || "").toLowerCase();
 
-    // Penalize YouTube thumbnails
-    if (url.includes("ytimg.com") || origin.includes("youtube.com")) score -= 10;
-    // Penalize video sites
-    if (origin.includes("tiktok") || origin.includes("vimeo")) score -= 10;
+    // === HARD PENALIZE — likely not product photos ===
+    if (url.includes("ytimg.com") || origin.includes("youtube.com")) score -= 20;
+    if (origin.includes("tiktok") || origin.includes("vimeo") || origin.includes("dailymotion")) score -= 20;
+    if (origin.includes("instagram") || origin.includes("twitter.com") || origin.includes("x.com")) score -= 15;
+    if (origin.includes("reddit.com") || origin.includes("quora.com")) score -= 15;
+    // Blog/news/review sites often use lifestyle shots
+    if (origin.includes("blog") || origin.includes("news") || origin.includes("review")) score -= 5;
+    if (title.includes("review") || title.includes("hands on") || title.includes("hands-on")) score -= 5;
+    if (title.includes("unboxing") || title.includes("vs ") || title.includes("comparison")) score -= 5;
+    if (title.includes("photographer") || title.includes("taking photo") || title.includes("lifestyle")) score -= 10;
 
-    // Prefer retailer/manufacturer sites
-    const goodSources = ["amazon", "flipkart", "apple.com", "samsung.com", "bestbuy", "walmart",
-      "croma", "jbhifi", "currys", "target.com", "gsmarena", "notebookcheck"];
-    if (goodSources.some((s) => origin.includes(s))) score += 5;
+    // === STRONG PREFER — official product images ===
+    // Manufacturer sites (official product shots, white bg)
+    const manufacturerSites = ["apple.com", "samsung.com", "sony.com", "canon.com", "nikon.com",
+      "lg.com", "dell.com", "lenovo.com", "asus.com", "hp.com", "microsoft.com", "google.com/store",
+      "nintendo.com", "playstation.com", "xbox.com", "dyson.com", "bose.com", "oneplus.com"];
+    if (manufacturerSites.some((s) => origin.includes(s))) score += 15;
 
-    // Prefer .png and .jpg over other formats
-    if (url.endsWith(".png") || url.endsWith(".jpg") || url.endsWith(".jpeg") || url.endsWith(".webp")) score += 2;
+    // Retailer product pages (usually clean product shots)
+    const retailerSites = ["amazon.", "flipkart.com", "bestbuy.com", "walmart.com", "target.com",
+      "croma.com", "jbhifi.com", "currys.co.uk", "mediamarkt", "reliance", "bhphotovideo"];
+    if (retailerSites.some((s) => origin.includes(s))) score += 10;
 
-    // Prefer images with product-related titles
-    if (img.title && !img.title.toLowerCase().includes("video") && !img.title.toLowerCase().includes("review")) score += 1;
+    // Spec/database sites (clean product renders)
+    const specSites = ["gsmarena.com", "notebookcheck", "rtings.com", "kimovil.com", "smartprix.com",
+      "91mobiles.com", "digit.in", "gadgets360", "pricebaba.com"];
+    if (specSites.some((s) => origin.includes(s))) score += 8;
+
+    // CDN URLs from retailers often have product images
+    if (url.includes("/images/i/") || url.includes("/product/") || url.includes("/products/")) score += 3;
+    if (url.includes("m.media-amazon") || url.includes("rukminim")) score += 8; // Amazon/Flipkart CDNs
+
+    // Image format bonus
+    if (url.endsWith(".png")) score += 3; // PNG = likely product render on transparent bg
+    if (url.endsWith(".jpg") || url.endsWith(".jpeg") || url.endsWith(".webp")) score += 1;
+
+    // Penalize tiny images (thumbnails) — check URL hints
+    if (url.includes("thumb") || url.includes("_small") || url.includes("_xs") || url.includes("50x50")) score -= 5;
+    // Prefer larger images
+    if (url.includes("_large") || url.includes("_xl") || url.includes("1200") || url.includes("1000")) score += 2;
 
     return { ...img, score };
   });
 
   scored.sort((a, b) => b.score - a.score);
-  return scored[0]?.image_url || null;
+
+  // Only return if the best image has a positive score — otherwise skip
+  const best = scored[0];
+  if (best && best.score > 0) {
+    console.log(`[image] picked: score=${best.score} origin=${best.origin_url} url=${best.image_url.substring(0, 80)}`);
+    return best.image_url;
+  }
+
+  console.log(`[image] no good image found (best score: ${scored[0]?.score})`);
+  return null;
 }
 
 /**
