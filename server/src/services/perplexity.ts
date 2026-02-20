@@ -201,6 +201,7 @@ Return this exact JSON structure:
 Rules:
 - Prices in ${regionConfig.currency} (integer, no decimals)
 - Check EVERY retailer listed above — only exclude if they genuinely don't sell the product
+- ALSO include ANY other online retailer or specialty store that sells this product, even if not in the list above
 - Include any ongoing offers, bank discounts, bundle deals in the "offers" field
 - Sort prices low to high`;
 
