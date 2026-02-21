@@ -270,11 +270,12 @@ async function _callPerplexityPrices(
 ): Promise<PriceSearchResult> {
   const retailerDomains = getRetailerDomains(regionConfig);
 
-  const systemPrompt = `You are a price research assistant for ${regionConfig.name} e-commerce. Return ONLY valid JSON.
+  const systemPrompt = `You are a price research assistant. You ONLY search for prices in ${regionConfig.name} from ${regionConfig.name}-based retailers. Return ONLY valid JSON.
 
-Your job: Find the current price of a product by checking EACH of these retailer websites individually: ${retailerDomains}
+Your job: Find the current ${regionConfig.currency} price of a product by checking EACH of these ${regionConfig.name} retailer websites individually: ${retailerDomains}
 
 You MUST check each retailer's website. Do not skip any — if a retailer sells the product, include their price.
+IMPORTANT: Only report prices from ${regionConfig.name} retailers in ${regionConfig.currency}. Do NOT include prices from other countries or convert between currencies. If searching for "PS5 Pro" in the United States, report the US dollar price (e.g. 699), NOT prices from India, UK, or other regions.
 
 Return this exact JSON structure:
 {
@@ -283,7 +284,7 @@ Return this exact JSON structure:
   "prices": [
     {
       "retailer": "retailer name",
-      "price": 99900,
+      "price": 699,
       "currency": "${regionConfig.currency}",
       "url": "leave empty string, will be auto-generated",
       "offers": "any special offers, discounts, bundle deals",
@@ -295,9 +296,10 @@ Return this exact JSON structure:
 }
 
 Rules:
-- Prices in ${regionConfig.currency} (integer, no decimals)
-- Check EVERY retailer listed above — only exclude if they genuinely don't sell the product
-- ALSO include ANY other online retailer or specialty store that sells this product, even if not in the list above
+- ALL prices MUST be in ${regionConfig.currency} as sold in ${regionConfig.name} — whole numbers, no decimals
+- Example: If currency is USD, a $699 product should have price: 699. If currency is INR, a ₹74999 product should have price: 74999
+- Check EVERY ${regionConfig.name} retailer listed above — only exclude if they genuinely don't sell the product in ${regionConfig.name}
+- ALSO include ANY other ${regionConfig.name}-based online retailer or specialty store that sells this product
 - Include any ongoing offers, bank discounts, bundle deals in the "offers" field
 - Sort prices low to high`;
 
@@ -311,7 +313,7 @@ Rules:
   } else if (sourceRetailer) {
     userMessage = `Find the current price of "${query}" across all major ${regionConfig.name} retailers. IMPORTANT: The user found this product on ${sourceRetailer}, so you MUST include ${sourceRetailer}'s price. Also check ${regionConfig.retailers.filter(r => r.toLowerCase() !== sourceRetailer.toLowerCase()).join(', ')}. Include any ongoing offers or discounts.`;
   } else {
-    userMessage = `Find the current price of "${query}" in ${regionConfig.name}. Check EACH retailer individually: ${retailerDomains}. Visit each website and report their current price. Include any ongoing offers or discounts.`;
+    userMessage = `Find the current ${regionConfig.currency} price of "${query}" as sold in ${regionConfig.name}. Check EACH ${regionConfig.name} retailer individually: ${retailerDomains}. Report prices in ${regionConfig.currency} only. Include any ongoing offers or discounts.`;
   }
 
   const response = await fetch("https://api.perplexity.ai/chat/completions", {
