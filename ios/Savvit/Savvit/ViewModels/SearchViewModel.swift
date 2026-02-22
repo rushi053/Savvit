@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import StoreKit
 
 @Observable
 @MainActor
@@ -9,20 +10,24 @@ class SearchViewModel {
     var loadingStep = ""
     var searchResult: ProductSearchResult?
     var errorMessage: String?
+    var errorKind: ErrorKind = .generic
     var showVerdict = false
     var recentSearches: [String] = []
+
+    enum ErrorKind { case timeout, urlResolve, searchFailed, noInternet, generic }
 
     init() {
         loadRecentSearches()
     }
 
-    func search() async {
+    func search(sourceUrl: String? = nil) async {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
 
         isLoading = true
         errorMessage = nil
         searchResult = nil
+        resolvedProductName = nil
         showVerdict = true
         loadingStep = "Checking retailers..."
 
@@ -36,20 +41,28 @@ class SearchViewModel {
         }
 
         do {
-            let result = try await APIClient.shared.searchProduct(query: query)
+            let result = try await APIClient.shared.searchProduct(query: query, sourceUrl: sourceUrl)
             loadingTask.cancel()
             searchResult = result
             saveToRecentSearches(query)
             isLoading = false
+
+            Analytics.track("search_performed", properties: [
+                "query": query,
+                "is_url": isURL(query)
+            ])
+            Analytics.track("verdict_viewed", properties: [
+                "product": result.product,
+                "verdict": result.verdict,
+                "confidence": result.confidence,
+                "region": result.region?.code ?? "unknown"
+            ])
+            incrementSearchCountAndPromptReview()
         } catch {
             loadingTask.cancel()
             isLoading = false
             showVerdict = false
-            if error.localizedDescription.contains("timed out") {
-                errorMessage = "Server is warming up. Please try again in a moment."
-            } else {
-                errorMessage = error.localizedDescription
-            }
+            categorizeError(error)
         }
     }
 
@@ -63,6 +76,25 @@ class SearchViewModel {
 
     func clearError() {
         errorMessage = nil
+        errorKind = .generic
+    }
+
+    private func categorizeError(_ error: Error) {
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
+        let msg = error.localizedDescription
+        if let urlError = error as? URLError, urlError.code == .notConnectedToInternet || urlError.code == .networkConnectionLost {
+            errorKind = .noInternet
+            errorMessage = "Check your connection and try again."
+        } else if msg.contains("timed out") || msg.contains("timeout") {
+            errorKind = .timeout
+            errorMessage = "Our server takes a moment to wake up on first use. Please try again."
+        } else if msg.contains("SEARCH_FAILED") {
+            errorKind = .searchFailed
+            errorMessage = "Couldn't find pricing data for this product. Try a more specific name (e.g. 'iPhone 16 Pro 256GB' instead of just 'iPhone')."
+        } else {
+            errorKind = .generic
+            errorMessage = msg
+        }
     }
 
     // MARK: - Unified Search (text or URL)
@@ -88,10 +120,12 @@ class SearchViewModel {
             resolvedProductName = productName
             searchQuery = productName
             isResolvingURL = false
-            await search()
+            await search(sourceUrl: urlString)
         } catch {
             isResolvingURL = false
-            errorMessage = "Couldn't identify product from that link. Try searching by name instead."
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            errorKind = .urlResolve
+            errorMessage = "We couldn't figure out the product from that link. Try searching by name instead."
         }
     }
 
@@ -281,5 +315,22 @@ class SearchViewModel {
             recentSearches = Array(recentSearches.prefix(Constants.maxRecentSearches))
         }
         UserDefaults.standard.set(recentSearches, forKey: Constants.UserDefaultsKeys.recentSearches)
+    }
+
+    // MARK: - Auto Review Prompt
+
+    private func incrementSearchCountAndPromptReview() {
+        let key = Constants.UserDefaultsKeys.searchCount
+        let reviewKey = Constants.UserDefaultsKeys.hasRequestedReview
+        let count = UserDefaults.standard.integer(forKey: key) + 1
+        UserDefaults.standard.set(count, forKey: key)
+
+        if count >= 3 && !UserDefaults.standard.bool(forKey: reviewKey) {
+            UserDefaults.standard.set(true, forKey: reviewKey)
+            if let scene = UIApplication.shared.connectedScenes
+                .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
+                SKStoreReviewController.requestReview(in: scene)
+            }
+        }
     }
 }

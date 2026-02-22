@@ -3,14 +3,26 @@ import SwiftUI
 struct WatchlistCard: View {
     let item: LocalWatchlistItem
     @Environment(WatchlistViewModel.self) private var watchlist
+    @AppStorage("selectedRegion") private var selectedRegion = ""
 
     var body: some View {
         HStack(spacing: Theme.spacingMD) {
-            Text(productEmoji)
-                .font(.system(size: 20))
-                .frame(width: 44, height: 44)
-                .background(Theme.savvitBlue)
-                .clipShape(Circle())
+            if let imageUrl = item.productImage, let url = URL(string: imageUrl) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 44, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusSM))
+                    default:
+                        emojiFallback
+                    }
+                }
+            } else {
+                emojiFallback
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.productName)
@@ -20,7 +32,10 @@ struct WatchlistCard: View {
 
                 HStack(spacing: 8) {
                     if let price = item.bestPrice {
-                        Text(price.inrFormatted)
+                        Text(price.formattedPrice(
+                            currency: regionCurrency.code,
+                            symbol: regionCurrency.symbol
+                        ))
                             .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(Theme.textPrimary)
                     }
@@ -59,12 +74,33 @@ struct WatchlistCard: View {
         }
     }
 
+    private var emojiFallback: some View {
+        Text(productEmoji)
+            .font(.system(size: 20))
+            .frame(width: 44, height: 44)
+            .background(Theme.savvitBlue)
+            .clipShape(Circle())
+    }
+
     private var verdictLabel: String {
         switch item.verdictType {
         case .buyNow: "Buy Now"
         case .wait: "Wait"
         case .dontBuy: "Don't Buy"
         }
+    }
+
+    private var regionCurrency: (code: String, symbol: String) {
+        let region = selectedRegion.isEmpty
+            ? (Locale.current.region?.identifier ?? "US")
+            : selectedRegion
+        let map: [String: (String, String)] = [
+            "US": ("USD", "$"), "IN": ("INR", "₹"), "GB": ("GBP", "£"),
+            "DE": ("EUR", "€"), "CA": ("CAD", "CA$"), "AU": ("AUD", "A$"),
+            "JP": ("JPY", "¥"), "FR": ("EUR", "€"),
+        ]
+        let pair = map[region] ?? ("USD", "$")
+        return (pair.0, pair.1)
     }
 
     private var productEmoji: String {

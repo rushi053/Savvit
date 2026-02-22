@@ -51,17 +51,21 @@ extension UIColor {
     }
 }
 
-// MARK: - Currency Formatting (Indian ₹ format)
+// MARK: - Currency Formatting
 
 extension Int {
-    var inrFormatted: String {
+    func formattedPrice(currency: String = "USD", symbol: String = "$", locale: String = "en-US") -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.currencyCode = "INR"
-        formatter.currencySymbol = "₹"
+        formatter.currencyCode = currency
+        formatter.currencySymbol = symbol
         formatter.maximumFractionDigits = 0
-        formatter.locale = Locale(identifier: "en_IN")
-        return formatter.string(from: NSNumber(value: self)) ?? "₹\(self)"
+        formatter.locale = Locale(identifier: locale)
+        return formatter.string(from: NSNumber(value: self)) ?? "\(symbol)\(self)"
+    }
+
+    var inrFormatted: String {
+        formattedPrice(currency: "INR", symbol: "₹", locale: "en-IN")
     }
 }
 

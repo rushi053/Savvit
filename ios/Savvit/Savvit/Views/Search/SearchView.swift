@@ -10,77 +10,95 @@ struct SearchView: View {
         @Bindable var vm = viewModel
 
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    header
+            VStack(alignment: .leading, spacing: 0) {
+                topBar
+
+                Spacer()
+
+                VStack(spacing: Theme.spacingXL) {
+                    VStack(spacing: Theme.spacingSM) {
+                        Text("Should you buy it\nnow or wait?")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(Theme.textPrimary)
+                            .tracking(-0.5)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(2)
+
+                        Text("AI-powered purchase verdicts in seconds")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity)
 
                     searchBar
-                        .padding(.top, Theme.spacingXXL)
 
                     if viewModel.isResolvingURL {
-                        Text("Identifying product...")
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.savvitBlue)
-                            .padding(.top, Theme.spacingSM)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-
-                    if !viewModel.recentSearches.isEmpty {
-                        recentSearches
-                            .padding(.top, 36)
+                        urlResolvingIndicator
+                            .frame(maxWidth: .infinity)
+                            .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    } else if let resolved = viewModel.resolvedProductName {
+                        resolvedBadge(resolved)
+                            .frame(maxWidth: .infinity)
+                            .transition(.opacity.combined(with: .scale(scale: 0.95)))
                     }
 
                     trending
-                        .padding(.top, 32)
                 }
-                .padding(.horizontal, Theme.horizontalPadding)
-                .padding(.top, 60)
-                .padding(.bottom, 120)
+
+                Spacer()
+
+                if !viewModel.recentSearches.isEmpty {
+                    recentSearches
+                        .padding(.bottom, 100)
+                }
             }
-            .scrollDismissesKeyboard(.interactively)
+            .padding(.horizontal, Theme.horizontalPadding)
             .background(Theme.bgPrimary.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
-            .animation(.easeInOut(duration: 0.2), value: viewModel.isResolvingURL)
+            .onTapGesture { isSearchFocused = false }
+            .animation(.easeInOut(duration: 0.25), value: viewModel.isResolvingURL)
+            .animation(.easeInOut(duration: 0.25), value: viewModel.resolvedProductName)
             .navigationDestination(isPresented: $vm.showVerdict) {
                 AnalyzingResultView(viewModel: viewModel)
             }
-            .alert("Something went wrong", isPresented: .init(
+            .alert(errorTitle, isPresented: .init(
                 get: { viewModel.errorMessage != nil },
                 set: { if !$0 { viewModel.clearError() } }
             )) {
-                Button("Try Again") {
-                    Task { await viewModel.unifiedSearch() }
+                if viewModel.errorKind == .timeout || viewModel.errorKind == .searchFailed {
+                    Button("Try Again") { Task { await viewModel.unifiedSearch() } }
+                    Button("Cancel", role: .cancel) {}
+                } else {
+                    Button("OK", role: .cancel) {}
                 }
-                Button("Cancel", role: .cancel) {}
             } message: {
                 Text(viewModel.errorMessage ?? "Unknown error")
             }
         }
     }
 
-    // MARK: - Header
+    // MARK: - Top Bar
 
-    private var header: some View {
-        VStack(spacing: 0) {
+    private var topBar: some View {
+        HStack {
             Image("SavvitLogo")
                 .resizable()
                 .aspectRatio(contentMode: .fill)
-                .frame(width: 52, height: 52)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
-                .shadow(color: Theme.savvitBlue.opacity(0.2), radius: 12, y: 4)
+                .frame(width: 34, height: 34)
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+
+            Spacer()
 
             Text("Savvit")
-                .font(.system(size: 32, weight: .bold))
+                .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(Theme.textPrimary)
-                .tracking(-0.5)
-                .padding(.top, Theme.spacingMD)
+                .tracking(-0.3)
 
-            Text("Should you buy it now or wait?")
-                .font(.system(size: 15))
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.top, Theme.spacingXS)
+            Spacer()
+
+            Color.clear.frame(width: 34, height: 34)
         }
-        .frame(maxWidth: .infinity)
+        .padding(.top, Theme.spacingSM)
     }
 
     // MARK: - Search Bar
@@ -147,82 +165,14 @@ struct SearchView: View {
         .animation(.easeInOut(duration: 0.25), value: isSearchFocused)
     }
 
-    // MARK: - Recent Searches
-
-    private var recentSearches: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingMD) {
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Theme.savvitBlue)
-                    Text("Recent Searches")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .tracking(-0.3)
-                }
-
-                Spacer()
-
-                Button {
-                    viewModel.recentSearches.removeAll()
-                    UserDefaults.standard.removeObject(forKey: Constants.UserDefaultsKeys.recentSearches)
-                } label: {
-                    Text("Clear All")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.savvitBlue)
-                }
-            }
-
-            VStack(spacing: 2) {
-                ForEach(Array(viewModel.recentSearches.prefix(5).enumerated()), id: \.element) { _, query in
-                    Button {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        viewModel.searchRecent(query)
-                    } label: {
-                        HStack(spacing: Theme.spacingMD) {
-                            Image(systemName: viewModel.isURL(query) ? "link" : "clock")
-                                .font(.system(size: 13))
-                                .foregroundStyle(Theme.savvitLime)
-                                .frame(width: 32, height: 32)
-                                .background(Theme.savvitBlue)
-                                .clipShape(Circle())
-
-                            Text(query)
-                                .font(.system(size: 15))
-                                .foregroundStyle(Theme.textPrimary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-
-                            Spacer()
-
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 13))
-                                .foregroundStyle(Theme.textTertiary)
-                        }
-                        .padding(.horizontal, Theme.spacingMD)
-                        .padding(.vertical, Theme.spacingMD)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
     // MARK: - Trending
 
     private var trending: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingMD) {
-            HStack(spacing: 6) {
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 15))
-                    .foregroundStyle(Theme.savvitBlue)
-                Text("Trending")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .tracking(-0.3)
-            }
+        VStack(spacing: Theme.spacingMD) {
+            Text("Try searching")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
+                .tracking(0.3)
 
             FlowLayout(spacing: 8) {
                 ForEach(trendingItems, id: \.self) { item in
@@ -242,6 +192,75 @@ struct SearchView: View {
                     .buttonStyle(.plain)
                 }
             }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    // MARK: - Recent Searches
+
+    private var recentSearches: some View {
+        VStack(alignment: .leading, spacing: Theme.spacingMD) {
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.savvitBlue)
+                    Text("Recents")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                }
+
+                Spacer()
+
+                Button {
+                    viewModel.recentSearches.removeAll()
+                    UserDefaults.standard.removeObject(forKey: Constants.UserDefaultsKeys.recentSearches)
+                } label: {
+                    Text("Clear")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.savvitBlue)
+                }
+            }
+
+            VStack(spacing: 0) {
+                ForEach(Array(viewModel.recentSearches.prefix(5).enumerated()), id: \.element) { index, query in
+                    if index > 0 {
+                        Divider().padding(.leading, 48)
+                    }
+
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        viewModel.searchRecent(query)
+                    } label: {
+                        HStack(spacing: Theme.spacingMD) {
+                            Image(systemName: viewModel.isURL(query) ? "link" : "clock")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.savvitLime)
+                                .frame(width: 28, height: 28)
+                                .background(Theme.savvitBlue)
+                                .clipShape(Circle())
+
+                            Text(query)
+                                .font(.system(size: 14))
+                                .foregroundStyle(Theme.textPrimary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+
+                            Spacer()
+
+                            Image(systemName: "arrow.up.left")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                        .padding(.vertical, Theme.spacingMD)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, Theme.spacingLG)
+            .background(Theme.bgSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusSM))
         }
     }
 
@@ -251,18 +270,76 @@ struct SearchView: View {
         !viewModel.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    private var errorTitle: String {
+        switch viewModel.errorKind {
+        case .timeout: "Server Warming Up"
+        case .urlResolve: "Couldn't Identify Product"
+        case .searchFailed: "Search Failed"
+        case .noInternet: "No Internet Connection"
+        case .generic: "Something went wrong"
+        }
+    }
+
     private func performSearch() {
         guard hasQuery else { return }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         isSearchFocused = false
         Task { await viewModel.unifiedSearch() }
     }
+
+    // MARK: - URL Resolving Indicator
+
+    private var urlResolvingIndicator: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "link")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.savvitLime)
+                .frame(width: 28, height: 28)
+                .background(Theme.savvitBlue)
+                .clipShape(Circle())
+                .phaseAnimator([false, true]) { content, phase in
+                    content
+                        .scaleEffect(phase ? 1.15 : 1)
+                        .opacity(phase ? 0.8 : 1)
+                } animation: { _ in
+                    .easeInOut(duration: 0.7)
+                }
+
+            Text("Identifying product...")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+
+            ProgressView()
+                .scaleEffect(0.7)
+                .tint(Theme.savvitBlue)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Theme.savvitBlue.opacity(0.06))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Theme.savvitBlue.opacity(0.1), lineWidth: 1))
+    }
+
+    private func resolvedBadge(_ name: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(Theme.verdictBuy)
+
+            Text(name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Theme.verdictBuy.opacity(0.08))
+        .clipShape(Capsule())
+    }
 }
 
 // MARK: - Analyzing + Result Wrapper
 
-/// Manages the analyzing animation, then transitions to the verdict once
-/// both the API has responded AND the step animation has completed.
 private struct AnalyzingResultView: View {
     var viewModel: SearchViewModel
     @Environment(WatchlistViewModel.self) private var watchlist
@@ -289,8 +366,6 @@ private struct AnalyzingResultView: View {
             }
         }
     }
-
-    // MARK: - Analyzing Content
 
     private var analyzingContent: some View {
         VStack(spacing: 0) {
@@ -363,8 +438,6 @@ private struct AnalyzingResultView: View {
         }
     }
 
-    // MARK: - Animation Orchestrator
-
     private func startAnimation() {
         Task {
             try? await Task.sleep(for: .milliseconds(500))
@@ -373,33 +446,27 @@ private struct AnalyzingResultView: View {
 
         Task {
             for i in 0..<4 {
-                // Reveal this step
                 withAnimation(.easeOut(duration: 0.3)) {
                     visibleSteps = i + 1
                 }
 
-                // Wait before checking — fast if API done, normal pace otherwise
                 let checkDelay: Duration = apiDone ? .milliseconds(200) : .milliseconds(600)
                 try? await Task.sleep(for: checkDelay)
 
-                // Check this step
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
                     checkedSteps = i + 1
                 }
 
-                // Gap before revealing next step
                 if i < 3 {
                     let gap: Duration = apiDone ? .milliseconds(150) : .milliseconds(400)
                     try? await Task.sleep(for: gap)
                 }
             }
 
-            // All 4 steps animated — wait for API if still running
             while !apiDone {
                 try? await Task.sleep(for: .milliseconds(100))
             }
 
-            // Brief pause so the user sees all checks before transitioning
             try? await Task.sleep(for: .milliseconds(500))
 
             withAnimation(.easeInOut(duration: 0.3)) {

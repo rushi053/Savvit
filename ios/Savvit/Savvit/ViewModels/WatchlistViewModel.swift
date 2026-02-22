@@ -48,18 +48,22 @@ class WatchlistViewModel {
             shortReason: result.shortReason,
             bestPrice: result.bestPrice?.price,
             bestRetailer: result.bestPrice?.retailer,
-            addedAt: Date()
+            addedAt: Date(),
+            productImage: result.productImage
         )
 
         localItems.insert(item, at: 0)
         saveLocalItems()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
+        Analytics.track("watchlist_added", properties: ["product": result.product])
     }
 
     func removeItem(id: String) {
+        let name = localItems.first(where: { $0.id == id })?.productName ?? "unknown"
         localItems.removeAll { $0.id == id }
         saveLocalItems()
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        Analytics.track("watchlist_removed", properties: ["product": name])
     }
 
     func isInWatchlist(query: String) -> Bool {
@@ -94,6 +98,7 @@ struct LocalWatchlistItem: Codable, Identifiable, Sendable {
     let bestPrice: Int?
     let bestRetailer: String?
     let addedAt: Date
+    let productImage: String?
 
     var verdictType: VerdictType {
         VerdictType(rawValue: verdict) ?? .wait

@@ -8,5 +8,8 @@ enum Constants {
     enum UserDefaultsKeys {
         static let hasSeenOnboarding = "hasSeenOnboarding"
         static let recentSearches = "recentSearches"
+        static let selectedRegion = "selectedRegion"
+        static let searchCount = "searchCount"
+        static let hasRequestedReview = "hasRequestedReview"
     }
 }

@@ -3,6 +3,8 @@ import SwiftUI
 struct HomeView: View {
     @Binding var selectedTab: Int
     @Environment(WatchlistViewModel.self) private var watchlist
+    @State private var itemToDelete: LocalWatchlistItem?
+    @AppStorage("watchlistBannerDismissed") private var bannerDismissed = false
 
     var body: some View {
         NavigationStack {
@@ -106,15 +108,88 @@ struct HomeView: View {
                 }
                 .padding(.bottom, Theme.spacingXL)
 
+                if !bannerDismissed {
+                    comingSoonBanner
+                        .padding(.bottom, Theme.spacingMD)
+                }
+
                 VStack(spacing: Theme.spacingMD) {
                     ForEach(watchlist.displayItems) { item in
                         WatchlistCard(item: item)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    itemToDelete = item
+                                } label: {
+                                    Label("Remove from Watchlist", systemImage: "trash")
+                                }
+                            }
                     }
                 }
             }
             .padding(.horizontal, Theme.horizontalPadding)
             .padding(.bottom, 120)
         }
+        .refreshable {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        .alert("Remove from Watchlist?", isPresented: .init(
+            get: { itemToDelete != nil },
+            set: { if !$0 { itemToDelete = nil } }
+        )) {
+            Button("Remove", role: .destructive) {
+                if let item = itemToDelete {
+                    withAnimation(Theme.snappy) { watchlist.removeItem(id: item.id) }
+                }
+                itemToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { itemToDelete = nil }
+        } message: {
+            Text("This will stop tracking \"\(itemToDelete?.productName ?? "")\".")
+        }
+    }
+
+    // MARK: - Coming Soon Banner
+
+    private var comingSoonBanner: some View {
+        HStack(alignment: .top, spacing: Theme.spacingMD) {
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.savvitLime)
+                .frame(width: 32, height: 32)
+                .background(Theme.savvitBlue)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Price Tracking & Alerts")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+
+                Text("Get notified when prices drop on your saved items. Coming soon with Savvit Pro.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineSpacing(2)
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                withAnimation(Theme.snappy) { bannerDismissed = true }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(width: 24, height: 24)
+            }
+        }
+        .padding(Theme.spacingLG)
+        .background(Theme.bgPrimary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cornerRadiusMD)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+        .transition(.opacity.combined(with: .scale(scale: 0.95)))
     }
 
     // MARK: - Stat Card

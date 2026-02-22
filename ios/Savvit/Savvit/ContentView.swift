@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct ContentView: View {
+    @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
+    @AppStorage("darkMode") private var darkMode = false
     @State private var selectedTab = 0
     @State private var watchlistVM = WatchlistViewModel()
     @Namespace private var tabAnimation
@@ -24,7 +26,14 @@ struct ContentView: View {
 
             tabBar
         }
+        .preferredColorScheme(darkMode ? .dark : .light)
         .environment(watchlistVM)
+        .fullScreenCover(isPresented: .init(
+            get: { !hasSeenOnboarding },
+            set: { if $0 { hasSeenOnboarding = false } }
+        )) {
+            OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)
+        }
     }
 
     // MARK: - Custom Floating Tab Bar

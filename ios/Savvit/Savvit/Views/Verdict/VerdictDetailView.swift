@@ -1,18 +1,22 @@
 import SwiftUI
+import StoreKit
 
 struct VerdictDetailView: View {
     let result: ProductSearchResult
 
     @Environment(WatchlistViewModel.self) private var watchlist
+    @AppStorage("selectedRegion") private var selectedRegion = ""
     @State private var showContent = false
     @State private var showProUpgrade = false
+    @State private var showProComingSoon = false
+    @State private var copiedDealId: String?
 
     var body: some View {
         ScrollView {
             VStack(spacing: Theme.spacingXL) {
                 verdictCard
 
-                if !result.prices.isEmpty {
+                if !validPrices.isEmpty {
                     whereToBuySection
                 }
 
@@ -20,8 +24,8 @@ struct VerdictDetailView: View {
                     waitSection
                 }
 
-                if result.nextSale != nil {
-                    couponsSection
+                if hasDealsOrSales {
+                    dealsSection
                 }
 
                 if result.proAnalysis != nil {
@@ -57,49 +61,113 @@ struct VerdictDetailView: View {
     // MARK: - Verdict Card
 
     private var verdictCard: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingLG) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: Theme.spacingSM) {
-                    HStack(spacing: Theme.spacingSM) {
-                        Circle()
-                            .fill(result.verdictType.color.opacity(0.15))
-                            .frame(width: 28, height: 28)
-                            .overlay(
-                                Image(systemName: result.verdictType.icon)
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(result.verdictType.color)
-                            )
-
-                        Text(result.verdictType.displayLabel)
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(result.verdictType.textColor)
-                            .tracking(-0.3)
-                    }
-
-                    Text(result.product)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                }
-
-                Spacer()
-
-                ConfidenceRing(
-                    confidence: result.confidence,
-                    color: result.verdictType.color
-                )
+        VStack(alignment: .leading, spacing: 0) {
+            if let imageUrl = result.productImage, let url = URL(string: imageUrl) {
+                imageHero(url: url)
             }
 
-            Text(result.reason)
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.textSecondary)
-                .lineSpacing(3)
+            VStack(alignment: .leading, spacing: Theme.spacingLG) {
+                HStack(alignment: .center) {
+                    verdictPill
+
+                    Spacer()
+
+                    ConfidenceRing(
+                        confidence: result.confidence,
+                        color: result.verdictType.color
+                    )
+                }
+
+                Text(result.product)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .tracking(-0.3)
+
+                Text(result.reason)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineSpacing(3)
+
+                if let topDeal = result.proAnalysis?.topDeal {
+                    HStack(spacing: 8) {
+                        Image(systemName: "tag.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.savvitLime)
+                        Text(topDeal)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(2)
+                    }
+                    .padding(Theme.spacingMD)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.savvitLime.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusSM))
+                }
+            }
+            .padding(Theme.spacingXL)
         }
-        .padding(Theme.spacingXL)
-        .background(result.verdictType.bgColor)
+        .background(Theme.bgPrimary)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cornerRadius)
-                .stroke(result.verdictType.color.opacity(0.12), lineWidth: 1)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private var verdictPill: some View {
+        HStack(spacing: 6) {
+            Image(systemName: result.verdictType.icon)
+                .font(.system(size: 13))
+            Text(result.verdictType.displayLabel)
+                .font(.system(size: 13, weight: .bold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(result.verdictType.color)
+        .clipShape(Capsule())
+    }
+
+    private func imageHero(url: URL) -> some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                Color.clear
+                    .frame(height: 220)
+                    .overlay {
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    }
+                    .clipped()
+                    .overlay(alignment: .bottom) {
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0),
+                                .init(color: Theme.bgPrimary.opacity(0.6), location: 0.7),
+                                .init(color: Theme.bgPrimary, location: 1),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 80)
+                    }
+            case .failure:
+                EmptyView()
+            default:
+                RoundedRectangle(cornerRadius: 0)
+                    .fill(Theme.bgSecondary)
+                    .frame(height: 200)
+                    .overlay(ProgressView())
+            }
+        }
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: Theme.cornerRadius,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: Theme.cornerRadius
+            )
         )
     }
 
@@ -117,10 +185,15 @@ struct VerdictDetailView: View {
             .foregroundStyle(Theme.textPrimary)
 
             VStack(spacing: Theme.spacingSM) {
-                ForEach(Array(result.prices.enumerated()), id: \.offset) { index, price in
+                ForEach(Array(validPrices.enumerated()), id: \.offset) { index, price in
                     retailerRow(price: price, isBest: index == 0)
                 }
             }
+
+            Text("Prices are fetched from the web and may not be accurate. Always verify on the retailer's site before purchasing. Savvit is not responsible for third-party pricing or transactions.")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.top, Theme.spacingSM)
         }
     }
 
@@ -167,12 +240,22 @@ struct VerdictDetailView: View {
             Spacer()
 
             HStack(spacing: Theme.spacingSM) {
-                Text(price.price.inrFormatted)
+                Text(price.price.formattedPrice(
+                    currency: resolvedCurrency.code,
+                    symbol: resolvedCurrency.symbol
+                ))
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
 
                 if let urlStr = price.url, let url = URL(string: urlStr) {
-                    Link(destination: url) {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        Analytics.track("retailer_link_tapped", properties: [
+                            "retailer": price.retailer,
+                            "product": result.product
+                        ])
+                        UIApplication.shared.open(url)
+                    } label: {
                         Image(systemName: "arrow.up.right.square")
                             .font(.system(size: 14))
                             .foregroundStyle(Theme.textTertiary)
@@ -240,43 +323,183 @@ struct VerdictDetailView: View {
         }
     }
 
-    // MARK: - Coupons & Sales
+    // MARK: - Deals & Coupons
 
-    private var couponsSection: some View {
+    private var hasDealsOrSales: Bool {
+        (result.deals != nil && !result.deals!.isEmpty) || result.nextSale != nil
+    }
+
+    private var dealsSection: some View {
         CardSection {
             HStack(spacing: Theme.spacingSM) {
-                Image(systemName: "percent")
+                Image(systemName: "tag.fill")
                     .font(.system(size: 17))
-                Text("Coupons & Sales")
+                Text("Deals & Coupons")
                     .font(.system(size: 17, weight: .semibold))
                     .tracking(-0.3)
             }
             .foregroundStyle(Theme.textPrimary)
 
+            if let summary = result.dealsSummary {
+                Text(summary)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineSpacing(2)
+            }
+
+            if let deals = result.deals {
+                VStack(spacing: Theme.spacingSM) {
+                    ForEach(Array(deals.enumerated()), id: \.offset) { _, deal in
+                        dealCard(deal)
+                    }
+                }
+            }
+
             if let sale = result.nextSale {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "bolt.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Theme.verdictWait)
-                        Text("Upcoming Sale")
-                            .font(.system(size: 13, weight: .semibold))
+                upcomingSaleCard(sale)
+            }
+        }
+    }
+
+    private func dealCard(_ deal: Deal) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: dealIcon(for: deal.type))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.savvitLime)
+                    .frame(width: 30, height: 30)
+                    .background(Theme.savvitBlue)
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(deal.title)
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+
+                        if let discount = deal.discount {
+                            Text(discount)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(Theme.textOnLime)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Theme.savvitLime)
+                                .clipShape(Capsule())
+                        }
                     }
 
-                    Text(buildSaleDescription(sale))
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineSpacing(2)
+                    if let retailer = deal.retailer {
+                        Text(retailer)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
                 }
-                .padding(Theme.spacingLG)
-                .background(Theme.verdictWaitBg)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.cornerRadiusMD)
-                        .stroke(Theme.verdictWait.opacity(0.08), lineWidth: 1)
-                )
+
+                Spacer(minLength: 0)
             }
+
+            Text(deal.description)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textSecondary)
+                .lineSpacing(2)
+
+            HStack(spacing: Theme.spacingMD) {
+                if let code = deal.code {
+                    couponCodeBadge(code, dealTitle: deal.title)
+                }
+
+                if let validUntil = deal.validUntil {
+                    Spacer(minLength: 0)
+                    Text("Valid until \(validUntil)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+            }
+        }
+        .padding(Theme.spacingLG)
+        .background(deal.type == "bank_offer"
+            ? Theme.savvitBlue.opacity(0.04)
+            : Theme.bgSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cornerRadiusMD)
+                .stroke(deal.type == "bank_offer"
+                    ? Theme.savvitBlue.opacity(0.1)
+                    : Color.clear,
+                    lineWidth: 1)
+        )
+    }
+
+    private func couponCodeBadge(_ code: String, dealTitle: String) -> some View {
+        let isCopied = copiedDealId == dealTitle
+        return Button {
+            UIPasteboard.general.string = code
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.easeInOut(duration: 0.2)) { copiedDealId = dealTitle }
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                await MainActor.run {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        if copiedDealId == dealTitle { copiedDealId = nil }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 10))
+                Text(isCopied ? "Copied!" : code)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            }
+            .foregroundStyle(isCopied ? Theme.verdictBuy : Theme.savvitBlue)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(isCopied ? Theme.verdictBuy.opacity(0.1) : Theme.savvitBlue.opacity(0.06))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .foregroundStyle(isCopied ? Theme.verdictBuy.opacity(0.3) : Theme.savvitBlue.opacity(0.2))
+            )
+            .contentTransition(.symbolEffect(.replace))
+        }
+    }
+
+    private func upcomingSaleCard(_ sale: SaleEvent) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.verdictWait)
+                Text("Coming Up")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+
+            Text(buildSaleDescription(sale))
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textSecondary)
+                .lineSpacing(2)
+        }
+        .padding(Theme.spacingLG)
+        .background(Theme.verdictWaitBg)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cornerRadiusMD)
+                .stroke(Theme.verdictWait.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private func dealIcon(for type: String) -> String {
+        switch type {
+        case "coupon": "ticket.fill"
+        case "bank_offer": "creditcard.fill"
+        case "cashback", "exchange": "arrow.triangle.2.circlepath"
+        case "student": "graduationcap.fill"
+        case "bundle": "shippingbox.fill"
+        case "sale": "percent"
+        default: "tag.fill"
         }
     }
 
@@ -334,10 +557,12 @@ struct VerdictDetailView: View {
 
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                Analytics.track("pro_tapped", properties: ["product": result.product, "context": "verdict_detail"])
+                showProComingSoon = true
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "sparkles")
-                    Text("Unlock Pro — ₹79/mo")
+                    Text("Unlock Pro — \(proPriceLabel)")
                 }
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Theme.textOnLime)
@@ -356,6 +581,11 @@ struct VerdictDetailView: View {
             )
         )
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .alert("Coming Soon", isPresented: $showProComingSoon) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Savvit Pro is coming soon! We'll notify you when it's ready.")
+        }
     }
 
     // MARK: - Watchlist Button
@@ -398,9 +628,9 @@ struct VerdictDetailView: View {
             }
         }
         .alert("Watchlist Full", isPresented: $showProUpgrade) {
-            Button("Maybe Later", role: .cancel) {}
+            Button("OK", role: .cancel) {}
         } message: {
-            Text("Free plan allows \(Constants.freeWatchlistLimit) items. Upgrade to Pro for unlimited tracking.")
+            Text("You're tracking \(Constants.freeWatchlistLimit) items — that's the free limit. Savvit Pro (coming soon) will unlock unlimited tracking.")
         }
     }
 
@@ -450,6 +680,32 @@ struct VerdictDetailView: View {
     }
 
     // MARK: - Helpers
+
+    private var validPrices: [PriceInfo] {
+        result.prices.filter { $0.price > 0 }
+    }
+
+    private var resolvedRegionCode: String {
+        if let code = result.region?.code { return code }
+        let saved = selectedRegion
+        if !saved.isEmpty { return saved }
+        return Locale.current.region?.identifier ?? "US"
+    }
+
+    private var resolvedCurrency: (code: String, symbol: String) {
+        if let r = result.region { return (r.currency, r.currencySymbol) }
+        let map: [String: (String, String)] = [
+            "US": ("USD", "$"), "IN": ("INR", "₹"), "GB": ("GBP", "£"),
+            "DE": ("EUR", "€"), "CA": ("CAD", "CA$"), "AU": ("AUD", "A$"),
+            "JP": ("JPY", "¥"), "FR": ("EUR", "€"),
+        ]
+        let pair = map[resolvedRegionCode] ?? ("USD", "$")
+        return (pair.0, pair.1)
+    }
+
+    private var proPriceLabel: String {
+        resolvedRegionCode == "IN" ? "₹79/mo" : "$4.99/mo"
+    }
 
     private func buildSaleDescription(_ sale: SaleEvent) -> String {
         var parts: [String] = [sale.name]
@@ -531,7 +787,8 @@ struct CardSection<Content: View>: View {
                 waitReason: "Price drop expected in 2-3 weeks",
                 estimatedSavings: "₹15,000-20,000",
                 bestTimeToBuy: "March 2026",
-                launchAlert: nil
+                launchAlert: nil,
+                topDeal: "Use HDFC card on Flipkart for ₹5,000 instant discount"
             ),
             launchIntel: LaunchIntel(
                 upcomingProduct: "iPhone 17 Pro",
@@ -540,7 +797,15 @@ struct CardSection<Content: View>: View {
             ),
             nextSale: SaleEvent(name: "Amazon Great Indian Festival", month: 3, discount: "15-35% on electronics"),
             priceHistory: nil,
-            citations: ["https://www.apple.com", "https://www.amazon.in"]
+            citations: ["https://www.apple.com", "https://www.amazon.in"],
+            region: RegionInfo(code: "IN", currency: "INR", currencySymbol: "₹"),
+            productImage: nil,
+            deals: [
+                Deal(type: "bank_offer", title: "HDFC Card Offer", description: "₹5,000 instant discount on HDFC credit cards", code: nil, retailer: "Flipkart", discount: "₹5,000 off", validUntil: "March 15, 2026", source: nil),
+                Deal(type: "coupon", title: "Extra 10% Off", description: "Use code for additional 10% off (max ₹2,000)", code: "SAVE10", retailer: "Amazon", discount: "10% off", validUntil: nil, source: nil),
+                Deal(type: "cashback", title: "Amazon Pay Cashback", description: "5% cashback with Amazon Pay ICICI card", code: nil, retailer: "Amazon", discount: "5% cashback", validUntil: nil, source: nil),
+            ],
+            dealsSummary: "Best deal: ₹5,000 off with HDFC card on Flipkart"
         ))
     }
     .environment(WatchlistViewModel())

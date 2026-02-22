@@ -1,9 +1,11 @@
 import SwiftUI
+import StoreKit
 
 struct SettingsView: View {
-    @AppStorage("pushNotifications") private var pushNotifications = true
-    @AppStorage("priceAlerts") private var priceAlerts = true
+    @State private var showNotificationsComingSoon = false
     @AppStorage("darkMode") private var darkMode = false
+    @AppStorage("selectedRegion") private var selectedRegion = ""
+    @State private var showProComingSoon = false
 
     var body: some View {
         NavigationStack {
@@ -16,27 +18,25 @@ struct SettingsView: View {
                         .padding(.top, 60)
                         .padding(.bottom, Theme.spacingXXL)
 
-                    profileCard
-                        .padding(.bottom, Theme.spacingXL)
-
                     proUpgradeCard
                         .padding(.bottom, 28)
 
                     sectionHeader("PREFERENCES")
 
                     VStack(spacing: 0) {
-                        settingToggle(icon: "bell.fill", label: "Push Notifications", isOn: $pushNotifications)
-                        sectionDivider
-                        settingToggle(
-                            icon: "bell.badge.fill",
-                            label: "Price Drop Alerts",
-                            subtitle: "Get notified when tracked prices drop",
-                            isOn: $priceAlerts
-                        )
+                        Button { showNotificationsComingSoon = true } label: {
+                            settingNav(icon: "bell.fill", label: "Notifications", trailing: "Coming with Pro")
+                        }
+                        .buttonStyle(.plain)
                         sectionDivider
                         settingToggle(icon: "moon.fill", label: "Dark Mode", isOn: $darkMode)
                         sectionDivider
-                        settingValue(icon: "globe", label: "Region", value: "United States")
+                        NavigationLink {
+                            RegionPickerView()
+                        } label: {
+                            settingNav(icon: "globe", label: "Region", trailing: regionDisplayName)
+                        }
+                        .buttonStyle(.plain)
                     }
                     .background(Theme.bgPrimary)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
@@ -49,11 +49,22 @@ struct SettingsView: View {
                     sectionHeader("SUPPORT")
 
                     VStack(spacing: 0) {
-                        settingNav(icon: "questionmark.circle.fill", label: "Help Center")
+                        NavigationLink {
+                            HelpCenterView()
+                        } label: {
+                            settingNav(icon: "questionmark.circle.fill", label: "Help Center")
+                        }
+                        .buttonStyle(.plain)
                         sectionDivider
-                        settingNav(icon: "message.fill", label: "Send Feedback")
+                        Button { sendFeedback() } label: {
+                            settingNav(icon: "message.fill", label: "Send Feedback")
+                        }
+                        .buttonStyle(.plain)
                         sectionDivider
-                        settingNav(icon: "star.fill", label: "Rate Savvit")
+                        Button { rateApp() } label: {
+                            settingNav(icon: "star.fill", label: "Rate Savvit")
+                        }
+                        .buttonStyle(.plain)
                     }
                     .background(Theme.bgPrimary)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
@@ -78,44 +89,10 @@ struct SettingsView: View {
             }
             .background(Theme.bgPrimary.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
-        }
-    }
-
-    // MARK: - Profile Card
-
-    private var profileCard: some View {
-        HStack(spacing: Theme.spacingLG) {
-            RoundedRectangle(cornerRadius: Theme.cornerRadiusMD)
-                .fill(Theme.savvitBlue)
-                .frame(width: 56, height: 56)
-                .overlay(
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(Theme.textOnBlue)
-                )
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Alex")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Text("alex@example.com")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
+            .onChange(of: selectedRegion) { _, newRegion in
+                Analytics.track("region_changed", properties: ["region": newRegion.isEmpty ? "auto" : newRegion])
             }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 20))
-                .foregroundStyle(Theme.textTertiary)
         }
-        .padding(Theme.spacingXL)
-        .background(Theme.bgPrimary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.cornerRadius)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-        )
     }
 
     // MARK: - Pro Upgrade
@@ -142,10 +119,13 @@ struct SettingsView: View {
                 }
             }
 
-            Button {} label: {
+            Button {
+                Analytics.track("pro_tapped", properties: ["context": "settings"])
+                showProComingSoon = true
+            } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "sparkles")
-                    Text("$4.99/month")
+                    Text(settingsProPrice)
                 }
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Theme.textOnLime)
@@ -164,6 +144,16 @@ struct SettingsView: View {
             )
         )
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .alert("Coming Soon", isPresented: $showProComingSoon) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Savvit Pro is coming soon! We'll notify you when it's ready.")
+        }
+        .alert("Coming Soon", isPresented: $showNotificationsComingSoon) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Push notifications and price drop alerts are coming with Savvit Pro.")
+        }
     }
 
     // MARK: - Section Components
@@ -180,10 +170,6 @@ struct SettingsView: View {
     private var sectionDivider: some View {
         Divider()
             .padding(.leading, 52)
-    }
-
-    private var settingIcon: some View {
-        EmptyView()
     }
 
     private func iconBadge(_ systemName: String) -> some View {
@@ -240,7 +226,7 @@ struct SettingsView: View {
         .padding(.vertical, 14)
     }
 
-    private func settingNav(icon: String, label: String) -> some View {
+    private func settingNav(icon: String, label: String, trailing: String? = nil) -> some View {
         HStack(spacing: Theme.spacingMD) {
             iconBadge(icon)
 
@@ -250,12 +236,56 @@ struct SettingsView: View {
 
             Spacer()
 
+            if let trailing {
+                Text(trailing)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+
             Image(systemName: "chevron.right")
                 .font(.system(size: 18))
                 .foregroundStyle(Theme.textTertiary)
         }
         .padding(.horizontal, Theme.spacingLG)
         .padding(.vertical, 14)
+    }
+
+    private var regionDisplayName: String {
+        let map = ["US": "United States", "IN": "India", "GB": "United Kingdom",
+                    "DE": "Germany", "CA": "Canada", "AU": "Australia",
+                    "JP": "Japan", "FR": "France"]
+        if selectedRegion.isEmpty { return "Auto" }
+        return map[selectedRegion] ?? selectedRegion
+    }
+
+    private var settingsProPrice: String {
+        let region = selectedRegion.isEmpty
+            ? (Locale.current.region?.identifier ?? "US")
+            : selectedRegion
+        return region == "IN" ? "₹79/mo" : "$4.99/mo"
+    }
+
+    // MARK: - Actions
+
+    private func sendFeedback() {
+        Analytics.track("feedback_tapped")
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let device = UIDevice.current.model
+        let systemVersion = UIDevice.current.systemVersion
+        let deviceInfo = "\(device), iOS \(systemVersion)"
+        let subject = "Savvit Feedback".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Savvit%20Feedback"
+        let body = "App Version: \(appVersion)\nDevice: \(deviceInfo)\n\n".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        if let url = URL(string: "mailto:feedback@savvit.app?subject=\(subject)&body=\(body)") {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    private func rateApp() {
+        Analytics.track("rate_app_tapped")
+        if let scene = UIApplication.shared.connectedScenes
+            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
+            SKStoreReviewController.requestReview(in: scene)
+        }
     }
 }
 

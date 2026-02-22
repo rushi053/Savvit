@@ -43,7 +43,7 @@ final class APIClient: Sendable {
 
     // MARK: - Product Search (no auth needed)
 
-    func searchProduct(query: String) async throws -> ProductSearchResult {
+    func searchProduct(query: String, sourceUrl: String? = nil) async throws -> ProductSearchResult {
         guard let url = URL(string: "\(Constants.apiBaseURL)/v1/products/search") else {
             throw APIError.invalidURL
         }
@@ -52,8 +52,11 @@ final class APIClient: Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 120
-        let region = Locale.current.region?.identifier ?? "US"
-        request.httpBody = try JSONEncoder().encode(["query": query, "region": region])
+        let saved = UserDefaults.standard.string(forKey: Constants.UserDefaultsKeys.selectedRegion) ?? ""
+        let region = saved.isEmpty ? (Locale.current.region?.identifier ?? "US") : saved
+        var body = ["query": query, "region": region]
+        if let sourceUrl { body["sourceUrl"] = sourceUrl }
+        request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await performRequest(request)
 

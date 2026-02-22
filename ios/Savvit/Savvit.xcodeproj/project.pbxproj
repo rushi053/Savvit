@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AA0001012F46A00100B53CFC /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = AA0001032F46A00300B53CFC /* PostHog */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		255082332F45CBA400B53CFC /* Savvit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Savvit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA0001012F46A00100B53CFC /* PostHog in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +70,7 @@
 			);
 			name = Savvit;
 			packageProductDependencies = (
+				AA0001032F46A00300B53CFC /* PostHog */,
 			);
 			productName = Savvit;
 			productReference = 255082332F45CBA400B53CFC /* Savvit.app */;
@@ -94,6 +100,9 @@
 			);
 			mainGroup = 2550822A2F45CBA300B53CFC;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				AA0001022F46A00200B53CFC /* XCRemoteSwiftPackageReference "posthog-ios" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 255082342F45CBA400B53CFC /* Products */;
 			projectDirPath = "";
@@ -332,6 +341,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AA0001022F46A00200B53CFC /* XCRemoteSwiftPackageReference "posthog-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/PostHog/posthog-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA0001032F46A00300B53CFC /* PostHog */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0001022F46A00200B53CFC /* XCRemoteSwiftPackageReference "posthog-ios" */;
+			productName = PostHog;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 2550822B2F45CBA400B53CFC /* Project object */;
 }

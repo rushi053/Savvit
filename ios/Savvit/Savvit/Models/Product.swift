@@ -40,10 +40,22 @@ struct ProductSearchResult: Codable, Sendable {
     let nextSale: SaleEvent?
     let priceHistory: [PricePoint]?
     let citations: [String]?
+    let region: RegionInfo?
+    let productImage: String?
+    let deals: [Deal]?
+    let dealsSummary: String?
 
     var verdictType: VerdictType {
         VerdictType(rawValue: verdict) ?? .wait
     }
+}
+
+// MARK: - Region Info
+
+struct RegionInfo: Codable, Sendable {
+    let code: String
+    let currency: String
+    let currencySymbol: String
 }
 
 // MARK: - Price Info
@@ -65,6 +77,7 @@ struct ProAnalysis: Codable, Sendable {
     let estimatedSavings: String?
     let bestTimeToBuy: String?
     let launchAlert: String?
+    let topDeal: String?
 }
 
 // MARK: - Launch Intelligence
@@ -73,6 +86,19 @@ struct LaunchIntel: Codable, Sendable {
     let upcomingProduct: String?
     let expectedDate: String?
     let summary: String?
+}
+
+// MARK: - Deal
+
+struct Deal: Codable, Sendable {
+    let type: String
+    let title: String
+    let description: String
+    let code: String?
+    let retailer: String?
+    let discount: String?
+    let validUntil: String?
+    let source: String?
 }
 
 // MARK: - Sale Event
