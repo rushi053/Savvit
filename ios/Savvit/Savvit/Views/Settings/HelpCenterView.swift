@@ -169,15 +169,18 @@ struct HelpCenterView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "envelope.fill")
                         .font(.system(size: 13))
+                        .foregroundColor(Color(hex: "C5FF00"))
                     Text("feedback@savvit.app")
                         .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(Color(hex: "C5FF00"))
                 }
-                .foregroundStyle(Theme.savvitLime)
                 .padding(.horizontal, Theme.spacingXL)
                 .padding(.vertical, Theme.spacingMD)
-                .background(Theme.savvitBlue)
+                .background(Color(hex: "233DFF"))
                 .clipShape(Capsule())
             }
+            .buttonStyle(.plain)
+            .tint(Color(hex: "C5FF00"))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Theme.spacingXL)

@@ -1,4 +1,5 @@
 import SwiftUI
+import SafariServices
 import StoreKit
 
 struct SettingsView: View {
@@ -6,6 +7,8 @@ struct SettingsView: View {
     @AppStorage("darkMode") private var darkMode = false
     @AppStorage("selectedRegion") private var selectedRegion = ""
     @State private var showProComingSoon = false
+    @State private var showRestoreAlert = false
+    @State private var showPrivacyPolicy = false
 
     var body: some View {
         NavigationStack {
@@ -49,6 +52,11 @@ struct SettingsView: View {
                     sectionHeader("SUPPORT")
 
                     VStack(spacing: 0) {
+                        Button { showPrivacyPolicy = true } label: {
+                            settingNav(icon: "lock.fill", label: "Privacy Policy")
+                        }
+                        .buttonStyle(.plain)
+                        sectionDivider
                         NavigationLink {
                             HelpCenterView()
                         } label: {
@@ -92,6 +100,10 @@ struct SettingsView: View {
             .onChange(of: selectedRegion) { _, newRegion in
                 Analytics.track("region_changed", properties: ["region": newRegion.isEmpty ? "auto" : newRegion])
             }
+            .sheet(isPresented: $showPrivacyPolicy) {
+                SafariView(url: URL(string: "https://savvit.app/privacy")!)
+                    .ignoresSafeArea()
+            }
         }
     }
 
@@ -134,6 +146,13 @@ struct SettingsView: View {
                 .background(Theme.savvitLime)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
             }
+
+            Button { showRestoreAlert = true } label: {
+                Text("Restore Purchases")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            .frame(maxWidth: .infinity)
         }
         .padding(Theme.spacingXL)
         .background(
@@ -153,6 +172,11 @@ struct SettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Push notifications and price drop alerts are coming with Savvit Pro.")
+        }
+        .alert("Restore Purchases", isPresented: $showRestoreAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("No previous purchases found.")
         }
     }
 
@@ -287,6 +311,20 @@ struct SettingsView: View {
             SKStoreReviewController.requestReview(in: scene)
         }
     }
+}
+
+// MARK: - Safari View
+
+struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let config = SFSafariViewController.Configuration()
+        config.entersReaderIfAvailable = false
+        return SFSafariViewController(url: url, configuration: config)
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }
 
 #Preview {

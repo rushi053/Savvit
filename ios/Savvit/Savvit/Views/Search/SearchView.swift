@@ -4,7 +4,7 @@ struct SearchView: View {
     @State private var viewModel = SearchViewModel()
     @FocusState private var isSearchFocused: Bool
 
-    private let trendingItems = ["iPhone 16", "MacBook Air M4", "PS5 Pro", "AirPods 4", "Dyson V15"]
+    private let trendingItems = ["iPhone 16", "MacBook Air M4", "PS5", "AirPods 4", "Dyson V15"]
 
     var body: some View {
         @Bindable var vm = viewModel

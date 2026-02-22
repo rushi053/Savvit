@@ -51,10 +51,6 @@ struct WatchlistCard: View {
             }
 
             Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Theme.textTertiary)
         }
         .padding(Theme.spacingLG)
         .background(Theme.bgPrimary)
