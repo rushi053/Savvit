@@ -228,10 +228,50 @@ export const SALE_CALENDAR: SaleEvent[] = [
 ];
 
 /**
- * Find the next upcoming sale event for a given region.
+ * Auto-detect product category from query string.
  */
-export function getNextSaleEvent(currentMonth: number, region?: string): SaleEvent | null {
+export function detectProductCategory(query: string): string[] {
+  const q = query.toLowerCase();
+  const categories: string[] = [];
+  
+  // Smartphones
+  if (/iphone|galaxy s|pixel|oneplus|redmi|poco|samsung.*phone|realme|vivo|oppo|nothing phone/i.test(q)) {
+    categories.push("smartphones");
+  }
+  // Laptops
+  if (/macbook|thinkpad|ideapad|xps|inspiron|zenbook|rog|vivobook|laptop|chromebook|surface (pro|laptop|go)/i.test(q)) {
+    categories.push("laptops");
+  }
+  // Gaming
+  if (/ps5|ps4|playstation|xbox|nintendo|switch|steam deck|gaming|rtx|gpu|graphics card/i.test(q)) {
+    categories.push("gaming");
+  }
+  // Electronics (general)
+  if (/airpods|headphone|earbuds|speaker|camera|drone|gopro|watch|tv|television|monitor|tablet|ipad|kindle/i.test(q)) {
+    categories.push("electronics");
+  }
+  // Home / appliances
+  if (/dyson|roomba|vacuum|washer|dryer|fridge|refrigerator|microwave|air purifier|robot vacuum/i.test(q)) {
+    categories.push("home", "appliances");
+  }
+  // Fashion
+  if (/shoes|sneakers|nike|adidas|jacket|clothing|bag|backpack/i.test(q)) {
+    categories.push("fashion");
+  }
+  
+  // Default to electronics if nothing matched
+  if (categories.length === 0) categories.push("electronics");
+  
+  return categories;
+}
+
+/**
+ * Find the next upcoming sale event for a given region.
+ * Optionally matches product category for more relevant results.
+ */
+export function getNextSaleEvent(currentMonth: number, region?: string, productQuery?: string): SaleEvent | null {
   const regionCode = (region || "US").toUpperCase();
+  const productCategories = productQuery ? detectProductCategory(productQuery) : [];
 
   // Filter to events relevant for this region
   const regionEvents = SALE_CALENDAR.filter(
@@ -244,6 +284,17 @@ export function getNextSaleEvent(currentMonth: number, region?: string): SaleEve
     return distA - distB;
   });
 
+  // If we have product categories, try to find a category-matching sale first
+  if (productCategories.length > 0) {
+    const categoryMatch = sorted.find((s) => {
+      const dist = (s.typicalMonth - currentMonth + 12) % 12;
+      if (dist <= 0 || dist > 3) return false;
+      return s.categories.some((c) => productCategories.includes(c));
+    });
+    if (categoryMatch) return categoryMatch;
+  }
+
+  // Fallback: any upcoming sale
   return sorted.find((s) => {
     const dist = (s.typicalMonth - currentMonth + 12) % 12;
     return dist > 0 && dist <= 3;

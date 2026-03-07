@@ -12,6 +12,8 @@ import { findProductCycle } from "../data/product-cycles.js";
 import { getRegionConfig, getSupportedRegions } from "../data/region-config.js";
 import { getCached, setCache, CACHE_TTL } from "../utils/cache.js";
 import { factCheckLaunchIntel } from "../services/fact-check.js";
+import { detectProductCategory } from "../data/sale-calendar.js";
+import { checkRateLimit, RATE_LIMITS } from "../utils/rate-limit.js";
 
 export const productRoutes = new Hono();
 
@@ -231,6 +233,34 @@ function filterStaleSaleDeals(deals: Array<{ title?: string; description?: strin
 }
 
 /**
+ * Detect price outliers — flag prices that are suspiciously far from the median.
+ * Returns the same array with `priceConfidence` added to each entry.
+ */
+function flagPriceOutliers(prices: Array<{ price: number; retailer: string; [key: string]: any }>): typeof prices {
+  const validPrices = prices.filter((p) => p.price > 0).map((p) => p.price);
+  if (validPrices.length < 2) {
+    return prices.map((p) => ({ ...p, priceConfidence: p.price > 0 ? "confirmed" : "unavailable" }));
+  }
+
+  // Calculate median
+  const sorted = [...validPrices].sort((a, b) => a - b);
+  const median = sorted.length % 2 === 0
+    ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+    : sorted[Math.floor(sorted.length / 2)];
+
+  return prices.map((p) => {
+    if (p.price <= 0) return { ...p, priceConfidence: "unavailable" };
+    const deviation = Math.abs(p.price - median) / median;
+    if (deviation > 0.5) {
+      console.log(`[price-check] Outlier: ${p.retailer} ${p.price} is ${(deviation * 100).toFixed(0)}% from median ${median}`);
+      return { ...p, priceConfidence: "suspicious" };
+    }
+    if (deviation > 0.25) return { ...p, priceConfidence: "estimated" };
+    return { ...p, priceConfidence: "confirmed" };
+  });
+}
+
+/**
  * POST /v1/products/search
  * The main endpoint — search for a product and get the full verdict.
  * This is the magic endpoint that powers the app.
@@ -241,6 +271,22 @@ productRoutes.post("/search", async (c) => {
 
   if (!query || typeof query !== "string" || query.trim().length < 2) {
     return c.json({ error: "Query must be at least 2 characters" }, 400);
+  }
+
+  // Rate limiting (by IP)
+  const clientIp = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const userId = c.req.header("authorization") ? "auth" : "anon";
+  const rateKey = `search:${clientIp}:${userId}`;
+  const rateConfig = userId === "auth" ? RATE_LIMITS.AUTHENTICATED : RATE_LIMITS.ANONYMOUS;
+  const rateResult = checkRateLimit(rateKey, rateConfig);
+  
+  if (!rateResult.allowed) {
+    return c.json({
+      error: "Too many searches. Please try again later.",
+      code: "RATE_LIMITED",
+      retryAfterMs: rateResult.retryAfterMs,
+      retryAfterSeconds: Math.ceil(rateResult.retryAfterMs / 1000),
+    }, 429);
   }
 
   const regionConfig = getRegionConfig(region);
@@ -302,14 +348,17 @@ productRoutes.post("/search", async (c) => {
     // TODO: Extract ASIN from Amazon URL or Keepa search
     const keepaHistory = null; // Will wire up when Keepa key is available
 
-    // Step 4: Get next sale event (region-aware)
+    // Step 4: Get next sale event (region + category aware)
     const currentMonth = new Date().getMonth() + 1;
-    const nextSale = getNextSaleEvent(currentMonth, regionConfig.code);
+    const nextSale = getNextSaleEvent(currentMonth, regionConfig.code, trimmedQuery);
 
     // Step 4b: Filter expired and stale deals
     let filteredDeals = dealsResult.deals || [];
     filteredDeals = filterExpiredDeals(filteredDeals);
     filteredDeals = filterStaleSaleDeals(filteredDeals);
+
+    // Step 4c: Flag price outliers
+    priceSearch.prices = flagPriceOutliers(priceSearch.prices);
 
     // Step 5: Calculate days until next sale (for smarter verdict)
     let daysUntilNextSale: number | null = null;
@@ -432,9 +481,13 @@ productRoutes.post("/search", async (c) => {
         currency: regionConfig.currency,
         currencySymbol: regionConfig.currencySymbol,
       },
+      productCategory: detectProductCategory(trimmedQuery),
       _meta: {
         latencyMs: Date.now() - startTime,
         cached: false,
+        retailersChecked: priceSearch.prices.length,
+        dealsFound: filteredDeals.length,
+        rateLimit: { remaining: rateResult.remaining },
       },
     };
 
@@ -444,7 +497,30 @@ productRoutes.post("/search", async (c) => {
     return c.json(response);
   } catch (err: any) {
     console.error(`[products/search] Error for "${trimmedQuery}":`, err.message);
-    return c.json({ error: err.message, code: "SEARCH_FAILED" }, 500);
+    
+    const message = err.message || "Something went wrong";
+    let code = "SEARCH_FAILED";
+    let status = 500;
+    let suggestion = "Please try again in a moment.";
+    
+    if (message.includes("API error: 429") || message.includes("rate")) {
+      code = "UPSTREAM_RATE_LIMITED";
+      status = 503;
+      suggestion = "Our data providers are busy. Please try again in 30 seconds.";
+    } else if (message.includes("timeout") || message.includes("ETIMEDOUT") || message.includes("ECONNRESET")) {
+      code = "TIMEOUT";
+      status = 504;
+      suggestion = "The search took too long. Try a more specific query (e.g., 'iPhone 16 Pro 256GB' instead of 'iPhone').";
+    } else if (message.includes("Could not parse")) {
+      code = "PARSE_ERROR";
+      suggestion = "We got unexpected data. Try rephrasing your search.";
+    } else if (message.includes("Could not determine product")) {
+      code = "URL_RESOLVE_FAILED";
+      status = 400;
+      suggestion = "We couldn't identify the product from that URL. Try entering the product name instead.";
+    }
+    
+    return c.json({ error: message, code, suggestion }, status);
   }
 });
 
