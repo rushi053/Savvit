@@ -31,6 +31,7 @@ export interface VerdictInput {
     name: string;
     date: string;
     historicalDiscount: string;
+    daysAway?: number | null;
   };
   productCycle?: {
     brand: string;
@@ -112,7 +113,8 @@ ${
   input.nextSaleEvent
     ? `NEXT SALE EVENT:
 - ${input.nextSaleEvent.name} — ${input.nextSaleEvent.date}
-- Historical discount: ${input.nextSaleEvent.historicalDiscount}`
+- Historical discount: ${input.nextSaleEvent.historicalDiscount}
+- Days away: ${input.nextSaleEvent.daysAway ?? "unknown"}`
     : "NEXT SALE: No major sale event in the next 60 days"
 }
 
@@ -133,13 +135,15 @@ Return ONLY valid JSON:
 }
 
 DECISION RULES:
-- BUY_NOW: Price is at/near historical low, no major sale coming within 30 days, no new model within 60 days. Strong active deals/coupons can tip toward BUY_NOW.
-- WAIT: Major sale coming within 60 days, OR new model launching within 90 days, OR price is significantly above average
-- DONT_BUY: Price is at historical high, OR new model launching very soon (<30 days), OR clear price gouging
-- When unsure, lean WAIT — it's safer advice
+- BUY_NOW: No major sale coming within 30 days AND no new model within 60 days. Also BUY_NOW if strong active deals/coupons are available right now, OR if the product is at a good price with no imminent reason to wait.
+- WAIT: Major sale coming within 30 days (NOT 60+ days — that's too far to wait), OR new model launching within 45 days with high confidence, OR price is clearly inflated/above normal.
+- DONT_BUY: New model launching very soon (<30 days), OR clear price gouging, OR product is discontinued/outdated with a much better successor available at similar price.
+- CRITICAL: Do NOT recommend WAIT just because a sale exists 2+ months away. Users want to buy things — a sale 60+ days out is NOT a reason to wait. Most people won't wait 2 months to save 10-15%.
+- If the next sale is 45+ days away and the current price is reasonable, recommend BUY_NOW.
+- If there are strong active deals/coupons right now, lean BUY_NOW — a bird in hand beats a speculative future sale.
 - Be specific with savings estimates and dates — use ${sym} for currency
 - Factor in active deals/coupons — if a bank offer or coupon effectively lowers the price significantly, mention it in your reasoning
-- shortReason should be punchy: "Near all-time low" or "New model in 5 weeks" or "Price spike — avoid"
+- shortReason should be punchy and actionable: "Great price — grab it" or "New model drops in 3 weeks" or "Price spike — avoid" or "Sale in 2 weeks — worth waiting"
 - topDeal: highlight the single best deal if any exist (e.g. "Use code SAVE10 on Amazon for 10% off" or "HDFC card: extra ${sym}5,000 off on Flipkart")`;
 
   const response = await fetch(API_URL, {

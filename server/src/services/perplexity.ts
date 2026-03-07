@@ -298,10 +298,12 @@ Return this exact JSON structure:
 Rules:
 - ALL prices MUST be in ${regionConfig.currency} as sold in ${regionConfig.name} — whole numbers, no decimals
 - Example: If currency is USD, a $699 product should have price: 699. If currency is INR, a ₹74999 product should have price: 74999
-- Check EVERY ${regionConfig.name} retailer listed above — only exclude if they genuinely don't sell the product in ${regionConfig.name}
-- ALSO include ANY other ${regionConfig.name}-based online retailer or specialty store that sells this product
-- Include any ongoing offers, bank discounts, bundle deals in the "offers" field
-- Sort prices low to high`;
+- Check EVERY ${regionConfig.name} retailer listed above — you MUST try each one individually. Only exclude if they genuinely don't sell this product.
+- ALSO include ANY other ${regionConfig.name}-based online retailer or specialty store that sells this product (e.g. brand official stores, specialty electronics retailers)
+- You MUST return at least 3 retailers if the product is commonly available. If you only find 1-2, try harder — check the brand's official store, check specialty retailers.
+- Include any ongoing offers, bank discounts, bundle deals, exchange offers in the "offers" field
+- Sort prices low to high
+- Today's date: ${new Date().toISOString().split("T")[0]} — only include currently valid prices and offers`;
 
   const isASINQuery = /Amazon ASIN [A-Z0-9]{10}/i.test(query);
   const isFlipkartQuery = /Flipkart item /i.test(query);
@@ -443,12 +445,15 @@ Types of deals to look for in ${regionConfig.name}:
 ${dealHints}
 
 Rules:
-- Only include CURRENTLY ACTIVE deals (not expired)
+- ONLY include deals that are CURRENTLY ACTIVE right now (today's date: ${new Date().toISOString().split("T")[0]})
+- Do NOT include past sale events (e.g. Republic Day Sale in January if it's now March)
+- Do NOT include deals with expired dates
 - Include the coupon/promo code when available
 - Be specific about conditions (min purchase, specific cards, etc.)
-- If no deals found, return empty deals array with summary "No active deals found"
+- If no active deals found, return empty deals array with summary "No active deals found"
 - Sort by value — biggest savings first
-- Include deals from ALL major ${regionConfig.name} retailers that sell this product`;
+- Include deals from ALL major ${regionConfig.name} retailers that sell this product
+- Verify the deal is actually current — do not return deals from articles about past sales`;
 
   const userMessage = `Find all active coupons, promo codes, bank offers, cashback deals, exchange offers, and discounts for "${query}" in ${regionConfig.name}. Check all major retailers: ${regionConfig.retailers.join(", ")}. Include any active sale events.`;
 

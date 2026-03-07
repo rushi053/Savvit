@@ -10,6 +10,7 @@ import { generateVerdict, VerdictInput } from "../services/gemini.js";
 import { getNextSaleEvent } from "../data/sale-calendar.js";
 import { findProductCycle } from "../data/product-cycles.js";
 import { getRegionConfig, getSupportedRegions } from "../data/region-config.js";
+import { getCached, setCache, CACHE_TTL } from "../utils/cache.js";
 
 export const productRoutes = new Hono();
 
@@ -170,6 +171,65 @@ async function resolveProductUrl(url: string): Promise<string> {
 }
 
 /**
+ * Filter out expired deals based on validUntil date.
+ * Removes deals whose expiry date has passed.
+ */
+function filterExpiredDeals(deals: Array<{ validUntil?: string | null; [key: string]: any }>): typeof deals {
+  const now = new Date();
+  return deals.filter((deal) => {
+    if (!deal.validUntil) return true; // No expiry = keep it
+    try {
+      const expiry = new Date(deal.validUntil);
+      // If the date is valid and in the past, filter it out
+      if (!isNaN(expiry.getTime()) && expiry < now) {
+        console.log(`[deals] Filtered expired deal: "${deal.title}" (expired ${deal.validUntil})`);
+        return false;
+      }
+    } catch {
+      // Can't parse date — keep the deal
+    }
+    return true;
+  });
+}
+
+/**
+ * Filter deals that reference past sale events (e.g. "Republic Day Sale" in March).
+ */
+function filterStaleSaleDeals(deals: Array<{ title?: string; description?: string; [key: string]: any }>): typeof deals {
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1; // 1-12
+  
+  // Sale events and their typical months
+  const pastSalePatterns: Array<{ pattern: RegExp; months: number[] }> = [
+    { pattern: /republic day/i, months: [1] },
+    { pattern: /new year/i, months: [12, 1] },
+    { pattern: /diwali|deepavali/i, months: [10, 11] },
+    { pattern: /big billion/i, months: [9, 10] },
+    { pattern: /great indian (festival|sale)/i, months: [9, 10] },
+    { pattern: /black friday|cyber monday/i, months: [11] },
+    { pattern: /prime day/i, months: [7] },
+    { pattern: /boxing day/i, months: [12] },
+    { pattern: /holiday sale/i, months: [12] },
+    { pattern: /valentine/i, months: [2] },
+  ];
+
+  return deals.filter((deal) => {
+    const text = `${deal.title || ""} ${deal.description || ""}`;
+    for (const { pattern, months } of pastSalePatterns) {
+      if (pattern.test(text)) {
+        // If the sale's typical month(s) have passed, filter it out
+        const allMonthsPassed = months.every((m) => m < currentMonth);
+        if (allMonthsPassed) {
+          console.log(`[deals] Filtered stale sale deal: "${deal.title}" (sale months: ${months}, current: ${currentMonth})`);
+          return false;
+        }
+      }
+    }
+    return true;
+  });
+}
+
+/**
  * POST /v1/products/search
  * The main endpoint — search for a product and get the full verdict.
  * This is the magic endpoint that powers the app.
@@ -195,6 +255,16 @@ productRoutes.post("/search", async (c) => {
     }
   }
 
+  // Check full response cache first (saves ALL API calls on repeat queries)
+  const fullCacheKey = `full:${regionConfig.code}:${trimmedQuery.toLowerCase()}`;
+  const cachedResponse = getCached<any>(fullCacheKey);
+  if (cachedResponse) {
+    return c.json({
+      ...cachedResponse,
+      _meta: { ...cachedResponse._meta, cached: true, latencyMs: Date.now() - startTime },
+    });
+  }
+
   try {
     // Step 1+2+2b: Run price search, launch intel, and deals in PARALLEL
     const productCycle = findProductCycle(trimmedQuery);
@@ -216,7 +286,23 @@ productRoutes.post("/search", async (c) => {
     const currentMonth = new Date().getMonth() + 1;
     const nextSale = getNextSaleEvent(currentMonth, regionConfig.code);
 
-    // Step 5: Generate verdict (Gemini)
+    // Step 4b: Filter expired and stale deals
+    let filteredDeals = dealsResult.deals || [];
+    filteredDeals = filterExpiredDeals(filteredDeals);
+    filteredDeals = filterStaleSaleDeals(filteredDeals);
+
+    // Step 5: Calculate days until next sale (for smarter verdict)
+    let daysUntilNextSale: number | null = null;
+    if (nextSale) {
+      const now = new Date();
+      const saleDate = new Date(now.getFullYear(), nextSale.typicalMonth - 1, 15); // mid-month estimate
+      if (saleDate < now) {
+        saleDate.setFullYear(saleDate.getFullYear() + 1);
+      }
+      daysUntilNextSale = Math.round((saleDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    }
+
+    // Step 6: Generate verdict (Gemini)
     const noRetailersAvailable = priceSearch.prices.length === 0;
     const verdictInput: VerdictInput = {
       productName: priceSearch.productName || trimmedQuery,
@@ -257,6 +343,7 @@ productRoutes.post("/search", async (c) => {
             name: nextSale.name,
             date: `${nextSale.typicalMonth}/2026`,
             historicalDiscount: nextSale.avgDiscount,
+            daysAway: daysUntilNextSale,
           }
         : undefined,
       productCycle: productCycle
@@ -267,8 +354,8 @@ productRoutes.post("/search", async (c) => {
           }
         : undefined,
       region: regionConfig.code,
-      deals: dealsResult.deals.length > 0
-        ? dealsResult.deals.map((d) => ({
+      deals: filteredDeals.length > 0
+        ? filteredDeals.map((d) => ({
             type: d.type,
             title: d.title,
             discount: d.discount,
@@ -300,7 +387,7 @@ productRoutes.post("/search", async (c) => {
           }
         : null,
       nextSale: nextSale
-        ? { name: nextSale.name, month: nextSale.typicalMonth, discount: nextSale.avgDiscount }
+        ? { name: nextSale.name, month: nextSale.typicalMonth, discount: nextSale.avgDiscount, daysAway: daysUntilNextSale }
         : null,
       priceHistory: keepaHistory
         ? {
@@ -309,10 +396,10 @@ productRoutes.post("/search", async (c) => {
             avg90d: keepaHistory.avg90d,
           }
         : null,
-      deals: dealsResult.deals.length > 0
-        ? dealsResult.deals
+      deals: filteredDeals.length > 0
+        ? filteredDeals
         : null,
-      dealsSummary: dealsResult.deals.length > 0 ? dealsResult.summary : null,
+      dealsSummary: filteredDeals.length > 0 ? dealsResult.summary : null,
       citations: [
         ...(priceSearch.citations || []),
         ...(launchIntel?.citations || []),
@@ -328,6 +415,9 @@ productRoutes.post("/search", async (c) => {
         cached: false,
       },
     };
+
+    // Cache the full response for 1 hour
+    setCache(fullCacheKey, response, 60 * 60 * 1000);
 
     return c.json(response);
   } catch (err: any) {
