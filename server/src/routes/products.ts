@@ -359,7 +359,7 @@ productRoutes.post("/search", async (c) => {
         inStock: p.inStock !== false, // default true if not specified
         offers: p.offers,
       }))
-    ).catch(console.error); // Fire-and-forget with error logging
+    ); // Fire-and-forget (errors logged internally)
 
     // Step 3b: Get our own price history from the database
     const ownPriceHistory = await getPriceHistory(
