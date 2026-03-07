@@ -396,9 +396,278 @@ interface DealsResult {
   citations: string[];
 }
 
+// Region-specific deal type hints (shared between combined + standalone)
+const REGION_DEAL_HINTS: Record<string, string> = {
+  IN: "bank card offers (HDFC, ICICI, SBI, Axis, Kotak, AMEX), No-Cost EMI, exchange/trade-in offers, Flipkart SuperCoins, Amazon Pay cashback, Croma gift card offers",
+  US: "promo codes, credit card cashback (Chase, Amex, Citi), trade-in programs (Apple, Best Buy, Amazon), student/military/first responder discounts, price match guarantees, Honey/Rakuten cashback",
+  UK: "voucher codes, cashback (TopCashback, Quidco), student discount (UNiDAYS, Student Beans), trade-in offers, Currys price promise",
+  DE: "Gutscheincodes, Cashback (Shoop, iGraal), trade-in programs, MediaMarkt/Saturn club offers, student discounts",
+  CA: "promo codes, Aeroplan/PC Optimum points, trade-in offers, student discounts, price match guarantees, Rakuten cashback",
+  AU: "promo codes, cashback (ShopBack, Cashrewards), trade-in programs, student discounts (UNiDAYS), JB Hi-Fi price match",
+  JP: "クーポン (coupons), point programs (Rakuten Points, T-Points, d-Points), trade-in offers, student discounts",
+  FR: "codes promo, cashback (iGraal, Poulpeo), offres de reprise (trade-in), remises étudiantes, offres de remboursement",
+};
+
+// ── Combined Prices + Deals (single API call) ──────────────────────
+
+interface CombinedPriceDealsResult {
+  priceSearch: PriceSearchResult;
+  dealsResult: DealsResult;
+}
+
+/**
+ * Fetch prices AND deals in a single Perplexity call.
+ * Saves ~3-4 seconds vs separate calls + reduces API cost.
+ */
+export async function searchPricesAndDeals(
+  query: string,
+  region?: string,
+  sourceUrl?: string
+): Promise<CombinedPriceDealsResult> {
+  const regionConfig = getRegionConfig(region);
+  const cacheKeyPrices = `prices:${regionConfig.code}:${query.toLowerCase().trim()}`;
+  const cacheKeyDeals = `deals:${regionConfig.code}:${query.toLowerCase().trim()}`;
+  
+  // Check if both are cached
+  const cachedPrices = getCached<PriceSearchResult>(cacheKeyPrices);
+  const cachedDeals = getCached<DealsResult>(cacheKeyDeals);
+  if (cachedPrices && cachedDeals) {
+    return { priceSearch: cachedPrices, dealsResult: cachedDeals };
+  }
+  // If only one is cached, still do combined call for the other (simpler logic)
+
+  const sourceRetailer = sourceUrl ? detectRetailerFromUrl(sourceUrl) : null;
+  const retailerDomains = getRetailerDomains(regionConfig);
+  const dealHints = REGION_DEAL_HINTS[regionConfig.code] || "promo codes, cashback, trade-in offers, student discounts";
+
+  const systemPrompt = `You are a shopping research assistant for ${regionConfig.name}. Return ONLY valid JSON.
+
+Your job: Find BOTH current prices AND active deals/coupons for a product. Check each retailer's website individually.
+
+Retailers to check: ${retailerDomains}
+
+Return this EXACT JSON structure with BOTH sections:
+{
+  "productName": "exact product name with variant/storage",
+  "prices": [
+    {
+      "retailer": "retailer name",
+      "price": 699,
+      "currency": "${regionConfig.currency}",
+      "url": "",
+      "offers": "any special offers visible on the product page",
+      "inStock": true
+    }
+  ],
+  "bestPrice": { "retailer": "cheapest retailer", "price": 599, "currency": "${regionConfig.currency}", "url": "", "offers": "", "inStock": true },
+  "summary": "1-2 sentence pricing overview",
+  "deals": [
+    {
+      "type": "coupon|bank_offer|cashback|exchange|student|bundle|sale|other",
+      "title": "Short title",
+      "description": "How to claim it",
+      "code": "PROMO_CODE or null",
+      "retailer": "Which retailer",
+      "discount": "e.g. 10% off, ${regionConfig.currencySymbol}5000 off",
+      "validUntil": "Expiry date or null",
+      "source": "Where found"
+    }
+  ],
+  "dealsSummary": "1-2 sentence overview of best active deals, or 'No active deals found'"
+}
+
+PRICE RULES:
+- ALL prices in ${regionConfig.currency}, whole numbers — e.g. ${regionConfig.currency === "USD" ? "699" : regionConfig.currency === "INR" ? "74999" : "699"}
+- Check EVERY retailer listed above individually. Include 3+ retailers minimum.
+- Include ongoing offers, bank discounts, bundle deals in "offers" field
+- Sort prices low to high
+- Today's date: ${new Date().toISOString().split("T")[0]}
+
+DEAL RULES:
+- ONLY currently active deals (not expired, not past sale events)
+- Types to look for: ${dealHints}
+- Include coupon/promo codes when available
+- Be specific about conditions (min purchase, specific cards, etc.)
+- Sort by value — biggest savings first
+- If no active deals, return empty deals array`;
+
+  const isASINQuery = /Amazon ASIN [A-Z0-9]{10}/i.test(query);
+  const isFlipkartQuery = /Flipkart item /i.test(query);
+  let userMessage: string;
+  if (isASINQuery) {
+    userMessage = `Identify this product and find current prices + active deals across all major ${regionConfig.name} retailers: ${query}. MUST include Amazon price. Also check ${regionConfig.retailers.filter(r => !r.toLowerCase().includes('amazon')).join(', ')}.`;
+  } else if (isFlipkartQuery) {
+    userMessage = `Identify this product and find current prices + active deals across all major ${regionConfig.name} retailers: ${query}. MUST include Flipkart price.`;
+  } else if (sourceRetailer) {
+    userMessage = `Find current prices AND active deals/coupons for "${query}" across all major ${regionConfig.name} retailers. MUST include ${sourceRetailer}'s price. Check: ${regionConfig.retailers.filter(r => r.toLowerCase() !== sourceRetailer.toLowerCase()).join(', ')}.`;
+  } else {
+    userMessage = `Find current ${regionConfig.currency} prices AND active deals/coupons for "${query}" in ${regionConfig.name}. Check each retailer: ${retailerDomains}. Report prices in ${regionConfig.currency} only.`;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+
+  try {
+    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: SONAR_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        temperature: 0.1,
+        return_images: true,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      throw new Error(`Perplexity API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "";
+    const citations = data.citations || [];
+    const images = data.images || [];
+    const productImage = pickBestProductImage(images);
+
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error("[perplexity:combined] No JSON in response:", content.substring(0, 300));
+      throw new Error("Could not parse combined search response");
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch {
+      console.error("[perplexity:combined] JSON parse failed:", jsonMatch[0].substring(0, 300));
+      throw new Error("Could not parse combined search response");
+    }
+
+    // Split into price result + deals result
+    const priceSearch: PriceSearchResult = {
+      productName: parsed.productName || query,
+      productImage: productImage,
+      prices: (parsed.prices || []).map((p: any) => ({
+        ...p,
+        price: typeof p.price === "number" ? p.price : parseInt(String(p.price).replace(/[^0-9]/g, ""), 10) || 0,
+      })),
+      bestPrice: parsed.bestPrice ? {
+        ...parsed.bestPrice,
+        price: typeof parsed.bestPrice.price === "number"
+          ? parsed.bestPrice.price
+          : parseInt(String(parsed.bestPrice.price).replace(/[^0-9]/g, ""), 10) || 0,
+      } : null,
+      summary: parsed.summary || "",
+      citations: citations,
+    };
+
+    const dealsResult: DealsResult = {
+      deals: Array.isArray(parsed.deals) ? parsed.deals : [],
+      summary: parsed.dealsSummary || (parsed.deals?.length ? "Deals found" : "No active deals found"),
+      citations: citations,
+    };
+
+    // Run the same post-processing as the standalone searchPrices
+    // Clear bestPrice if no real price
+    if (priceSearch.bestPrice && priceSearch.bestPrice.price <= 0) {
+      priceSearch.bestPrice = null;
+    }
+
+    // Replace URLs with real retailer search URLs
+    const productName = priceSearch.productName || query;
+    for (const price of priceSearch.prices) {
+      price.url = getRetailerSearchUrl(price.retailer, productName, regionConfig);
+    }
+    if (priceSearch.bestPrice) {
+      priceSearch.bestPrice.url = getRetailerSearchUrl(priceSearch.bestPrice.retailer, productName, regionConfig);
+    }
+
+    // Override source retailer URL
+    if (sourceRetailer && sourceUrl) {
+      for (const p of priceSearch.prices) {
+        if (_retailerMatch(p.retailer, sourceRetailer)) { p.url = sourceUrl; break; }
+      }
+      if (priceSearch.bestPrice && _retailerMatch(priceSearch.bestPrice.retailer, sourceRetailer)) {
+        priceSearch.bestPrice.url = sourceUrl;
+      }
+    }
+
+    // Tag trusted/untrusted + sort
+    for (const p of priceSearch.prices) {
+      p.trusted = isTrustedRetailer(p.retailer, regionConfig);
+    }
+    priceSearch.prices.sort((a, b) => {
+      const aHasPrice = a.price > 0 ? 1 : 0;
+      const bHasPrice = b.price > 0 ? 1 : 0;
+      if (aHasPrice !== bHasPrice) return bHasPrice - aHasPrice;
+      if (aHasPrice && bHasPrice) {
+        if (a.trusted && !b.trusted) return -1;
+        if (!a.trusted && b.trusted) return 1;
+        return a.price - b.price;
+      }
+      return 0;
+    });
+
+    // bestPrice = cheapest trusted
+    const cheapestTrusted = priceSearch.prices.find((p) => p.trusted && p.price > 0);
+    if (cheapestTrusted) {
+      priceSearch.bestPrice = { ...cheapestTrusted };
+    } else if (priceSearch.prices.length > 0 && priceSearch.prices[0].price > 0) {
+      priceSearch.bestPrice = { ...priceSearch.prices[0] };
+    }
+
+    // Guarantee source retailer
+    if (sourceRetailer && sourceUrl) {
+      const hasSource = priceSearch.prices.some((p) => _retailerMatch(p.retailer, sourceRetailer));
+      if (!hasSource) {
+        priceSearch.prices.push({
+          retailer: sourceRetailer,
+          price: 0,
+          currency: regionConfig.currency,
+          url: sourceUrl,
+          offers: "Price available on retailer page",
+          inStock: true,
+          trusted: true,
+        });
+      } else {
+        for (const p of priceSearch.prices) {
+          if (_retailerMatch(p.retailer, sourceRetailer)) { p.url = sourceUrl; break; }
+        }
+      }
+    }
+
+    // Cache both
+    if (priceSearch.prices.length > 0 && priceSearch.prices.some((p) => p.price > 0)) {
+      setCache(cacheKeyPrices, priceSearch, CACHE_TTL.PRICES);
+    }
+    if (dealsResult.deals.length > 0) {
+      setCache(cacheKeyDeals, dealsResult, CACHE_TTL.PRICES);
+    }
+
+    console.log(`[perplexity:combined] ${query} (${regionConfig.code}): ${priceSearch.prices.length} prices, ${dealsResult.deals.length} deals`);
+
+    return { priceSearch, dealsResult };
+  } catch (err: any) {
+    clearTimeout(timeout);
+    if (err.name === "AbortError") {
+      throw new Error("Price search timed out after 15 seconds. Try a more specific query.");
+    }
+    throw err;
+  }
+}
+
 /**
  * Search for active coupons, bank offers, cashback deals, exchange offers,
  * student discounts, and bundle deals for a product — region-aware.
+ * @deprecated Use searchPricesAndDeals() for combined search. Kept for backward compatibility.
  */
 export async function searchDeals(query: string, region?: string): Promise<DealsResult> {
   const regionConfig = getRegionConfig(region);
@@ -406,19 +675,7 @@ export async function searchDeals(query: string, region?: string): Promise<Deals
   const cached = getCached<DealsResult>(cacheKey);
   if (cached) return cached;
 
-  // Region-specific deal types to search for
-  const regionDealHints: Record<string, string> = {
-    IN: "bank card offers (HDFC, ICICI, SBI, Axis, Kotak, AMEX), No-Cost EMI, exchange/trade-in offers, Flipkart SuperCoins, Amazon Pay cashback, Croma gift card offers",
-    US: "promo codes, credit card cashback (Chase, Amex, Citi), trade-in programs (Apple, Best Buy, Amazon), student/military/first responder discounts, price match guarantees, Honey/Rakuten cashback",
-    UK: "voucher codes, cashback (TopCashback, Quidco), student discount (UNiDAYS, Student Beans), trade-in offers, Currys price promise",
-    DE: "Gutscheincodes, Cashback (Shoop, iGraal), trade-in programs, MediaMarkt/Saturn club offers, student discounts",
-    CA: "promo codes, Aeroplan/PC Optimum points, trade-in offers, student discounts, price match guarantees, Rakuten cashback",
-    AU: "promo codes, cashback (ShopBack, Cashrewards), trade-in programs, student discounts (UNiDAYS), JB Hi-Fi price match",
-    JP: "クーポン (coupons), point programs (Rakuten Points, T-Points, d-Points), trade-in offers, student discounts",
-    FR: "codes promo, cashback (iGraal, Poulpeo), offres de reprise (trade-in), remises étudiantes, offres de remboursement",
-  };
-
-  const dealHints = regionDealHints[regionConfig.code] || "promo codes, cashback, trade-in offers, student discounts";
+  const dealHints = REGION_DEAL_HINTS[regionConfig.code] || "promo codes, cashback, trade-in offers, student discounts";
 
   const systemPrompt = `You are a deal-finding assistant for ${regionConfig.name}. Return ONLY valid JSON.
 
@@ -498,7 +755,6 @@ Rules:
   if (!Array.isArray(result.deals)) result.deals = [];
   result.citations = citations;
 
-  // Cache deals for 6 hours (same as prices — deals change frequently)
   if (result.deals.length > 0) {
     setCache(cacheKey, result, CACHE_TTL.PRICES);
   }
@@ -535,6 +791,9 @@ Rules:
 
   const userMessage = `Is there an upcoming new version of "${productName}" (category: ${category}) expected to launch soon? What are the latest rumors and expected dates?`;
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout (launch intel is less critical)
+
   const response = await fetch("https://api.perplexity.ai/chat/completions", {
     method: "POST",
     headers: {
@@ -549,7 +808,9 @@ Rules:
       ],
       temperature: 0.1,
     }),
+    signal: controller.signal,
   });
+  clearTimeout(timeout);
 
   if (!response.ok) {
     throw new Error(`Perplexity API error: ${response.status}`);

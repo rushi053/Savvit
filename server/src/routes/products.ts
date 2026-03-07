@@ -4,7 +4,7 @@
  */
 
 import { Hono } from "hono";
-import { searchPrices, searchLaunchIntel, searchDeals } from "../services/perplexity.js";
+import { searchPricesAndDeals, searchLaunchIntel } from "../services/perplexity.js";
 import { getAmazonPriceHistory } from "../services/keepa.js";
 import { generateVerdict, VerdictInput } from "../services/gemini.js";
 import { getNextSaleEvent } from "../data/sale-calendar.js";
@@ -313,16 +313,17 @@ productRoutes.post("/search", async (c) => {
   }
 
   try {
-    // Step 1+2+2b: Run price search, launch intel, and deals in PARALLEL
+    // Step 1+2: Run combined price+deals search AND launch intel in PARALLEL
+    // Combined call saves ~3-4s vs separate price + deals calls
     const productCycle = findProductCycle(trimmedQuery);
-    const [priceSearch, launchIntel, dealsResult] = await Promise.all([
-      // Prices (with source retailer guarantee)
-      searchPrices(trimmedQuery, regionConfig.code, sourceUrl),
-      // Launch intel
+    const [combinedResult, launchIntel] = await Promise.all([
+      // Prices + Deals (single Perplexity call)
+      searchPricesAndDeals(trimmedQuery, regionConfig.code, sourceUrl),
+      // Launch intel (separate — different prompt structure)
       searchLaunchIntel(trimmedQuery, productCycle?.productLine || "general").catch(() => null),
-      // Deals & coupons
-      searchDeals(trimmedQuery, regionConfig.code).catch(() => ({ deals: [], summary: "Could not fetch deals", citations: [] as string[] })),
     ]);
+    const priceSearch = combinedResult.priceSearch;
+    const dealsResult = combinedResult.dealsResult;
 
     // Step 2c: Fact-check launch intel
     let launchFactCheck = null;
@@ -522,6 +523,64 @@ productRoutes.post("/search", async (c) => {
     
     return c.json({ error: message, code, suggestion }, status);
   }
+});
+
+/**
+ * POST /v1/products/warm
+ * Pre-warm cache for popular product searches.
+ * Called by cron job to ensure popular searches are instant.
+ */
+productRoutes.post("/warm", async (c) => {
+  const authHeader = c.req.header("authorization");
+  const expectedToken = process.env.ADMIN_TOKEN || process.env.RENDER_EXTERNAL_URL;
+  if (!authHeader || !authHeader.includes(expectedToken || "__no_admin_token__")) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const POPULAR_PRODUCTS_IN = [
+    "iPhone 16 Pro", "iPhone 16", "MacBook Air M4", "MacBook Pro M4",
+    "Samsung Galaxy S25 Ultra", "Samsung Galaxy S25", "PS5", "PS5 Pro",
+    "iPad Air M3", "AirPods Pro 3", "Apple Watch Ultra 3",
+    "OnePlus 13", "Google Pixel 9 Pro", "Sony WH-1000XM5",
+    "Samsung Galaxy Z Fold 6", "Nothing Phone 3",
+  ];
+
+  const POPULAR_PRODUCTS_US = [
+    "iPhone 16 Pro", "MacBook Air M4", "PS5 Pro", "Samsung Galaxy S25 Ultra",
+    "AirPods Pro 3", "Sony WH-1000XM5", "iPad Pro M4", "Nintendo Switch 2",
+    "Apple Watch Ultra 3", "Dell XPS 16",
+  ];
+
+  const results: Array<{ query: string; region: string; status: string; latencyMs: number }> = [];
+
+  // Warm IN products
+  for (const query of POPULAR_PRODUCTS_IN) {
+    const start = Date.now();
+    try {
+      await searchPricesAndDeals(query, "IN");
+      results.push({ query, region: "IN", status: "ok", latencyMs: Date.now() - start });
+    } catch (err: any) {
+      results.push({ query, region: "IN", status: `error: ${err.message}`, latencyMs: Date.now() - start });
+    }
+  }
+
+  // Warm US products
+  for (const query of POPULAR_PRODUCTS_US) {
+    const start = Date.now();
+    try {
+      await searchPricesAndDeals(query, "US");
+      results.push({ query, region: "US", status: "ok", latencyMs: Date.now() - start });
+    } catch (err: any) {
+      results.push({ query, region: "US", status: `error: ${err.message}`, latencyMs: Date.now() - start });
+    }
+  }
+
+  const okCount = results.filter((r) => r.status === "ok").length;
+  return c.json({
+    warmed: okCount,
+    total: results.length,
+    results,
+  });
 });
 
 /**
