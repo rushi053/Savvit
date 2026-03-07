@@ -88,8 +88,9 @@ ${
 - All-time high: ${fp(input.priceHistory.allTimeHigh)}
 - 90-day average: ${fp(input.priceHistory.avg90d)}
 - 180-day average: ${fp(input.priceHistory.avg180d)}
-- Current vs average: ${input.priceHistory.currentVsAvg}`
-    : "PRICE HISTORY: Not available yet"
+- Current vs average: ${input.priceHistory.currentVsAvg}
+${input.bestPrice ? `- Current price (${fp(input.bestPrice.price)}) is ${input.bestPrice.price < input.priceHistory.allTimeLow ? "BELOW all-time low! 🔥" : input.bestPrice.price > input.priceHistory.allTimeHigh ? "ABOVE all-time high ⚠️" : `${((input.bestPrice.price - input.priceHistory.allTimeLow) / input.priceHistory.allTimeLow * 100).toFixed(1)}% above all-time low`}` : ""}`
+    : "PRICE HISTORY: Not available yet (this is a new product or first search in this region)"
 }
 
 ${

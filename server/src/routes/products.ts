@@ -14,6 +14,7 @@ import { getCached, setCache, CACHE_TTL } from "../utils/cache.js";
 import { factCheckLaunchIntel } from "../services/fact-check.js";
 import { detectProductCategory } from "../data/sale-calendar.js";
 import { checkRateLimit, RATE_LIMITS } from "../utils/rate-limit.js";
+import { storePrices, getPriceHistory } from "../services/price-history.js";
 
 export const productRoutes = new Hono();
 
@@ -344,10 +345,36 @@ productRoutes.post("/search", async (c) => {
       }
     }
 
-    // Step 3: Get Amazon price history (Keepa) — if we can find an ASIN
+    // Step 3: Store prices in our database (fire-and-forget)
+    // This builds our own historical price database over time
+    const productNameForStorage = priceSearch.productName || trimmedQuery;
+    storePrices(
+      productNameForStorage,
+      trimmedQuery,
+      regionConfig.code,
+      priceSearch.prices.map((p) => ({
+        retailer: p.retailer,
+        price: p.price,
+        currency: regionConfig.currency,
+        inStock: p.inStock !== false, // default true if not specified
+        offers: p.offers,
+      }))
+    ).catch(console.error); // Fire-and-forget with error logging
+
+    // Step 3b: Get our own price history from the database
+    const ownPriceHistory = await getPriceHistory(
+      productNameForStorage,
+      regionConfig.code,
+      90 // last 90 days
+    );
+
+    // Step 3c: Get Amazon price history (Keepa) — if we can find an ASIN
     // For MVP, we skip Keepa if no key configured
     // TODO: Extract ASIN from Amazon URL or Keepa search
     const keepaHistory = null; // Will wire up when Keepa key is available
+
+    // Merge Keepa + our own history (prefer Keepa if available, fallback to ours)
+    const priceHistory = keepaHistory || ownPriceHistory;
 
     // Step 4: Get next sale event (region + category aware)
     const currentMonth = new Date().getMonth() + 1;
@@ -385,16 +412,16 @@ productRoutes.post("/search", async (c) => {
       bestPrice: priceSearch.bestPrice
         ? { retailer: priceSearch.bestPrice.retailer, price: priceSearch.bestPrice.price }
         : null,
-      priceHistory: keepaHistory
+      priceHistory: priceHistory?.stats
         ? {
-            allTimeLow: keepaHistory.allTimeLow,
-            allTimeHigh: keepaHistory.allTimeHigh,
-            avg90d: keepaHistory.avg90d,
-            avg180d: keepaHistory.avg180d,
+            allTimeLow: priceHistory.stats.allTimeLow,
+            allTimeHigh: priceHistory.stats.allTimeHigh,
+            avg90d: priceHistory.stats.ninetyDayAvg,
+            avg180d: priceHistory.stats.ninetyDayAvg, // We only track 90d for now
             currentVsAvg: priceSearch.bestPrice
-              ? priceSearch.bestPrice.price < keepaHistory.avg90d
+              ? priceSearch.bestPrice.price < priceHistory.stats.ninetyDayAvg
                 ? "below"
-                : priceSearch.bestPrice.price > keepaHistory.avg90d
+                : priceSearch.bestPrice.price > priceHistory.stats.ninetyDayAvg
                 ? "above"
                 : "at"
               : "unknown",
@@ -461,11 +488,15 @@ productRoutes.post("/search", async (c) => {
       nextSale: nextSale
         ? { name: nextSale.name, month: nextSale.typicalMonth, discount: nextSale.avgDiscount, daysAway: daysUntilNextSale }
         : null,
-      priceHistory: keepaHistory
+      priceHistory: priceHistory?.stats
         ? {
-            allTimeLow: keepaHistory.allTimeLow,
-            allTimeHigh: keepaHistory.allTimeHigh,
-            avg90d: keepaHistory.avg90d,
+            allTimeLow: priceHistory.stats.allTimeLow,
+            allTimeHigh: priceHistory.stats.allTimeHigh,
+            avg90d: priceHistory.stats.ninetyDayAvg,
+            avg30d: priceHistory.stats.thirtyDayAvg,
+            trend: priceHistory.stats.trend,
+            percentFromLow: priceHistory.stats.percentFromLow,
+            percentFromHigh: priceHistory.stats.percentFromHigh,
           }
         : null,
       deals: filteredDeals.length > 0
