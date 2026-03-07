@@ -11,6 +11,7 @@ import { getNextSaleEvent } from "../data/sale-calendar.js";
 import { findProductCycle } from "../data/product-cycles.js";
 import { getRegionConfig, getSupportedRegions } from "../data/region-config.js";
 import { getCached, setCache, CACHE_TTL } from "../utils/cache.js";
+import { factCheckLaunchIntel } from "../services/fact-check.js";
 
 export const productRoutes = new Hono();
 
@@ -277,6 +278,25 @@ productRoutes.post("/search", async (c) => {
       searchDeals(trimmedQuery, regionConfig.code).catch(() => ({ deals: [], summary: "Could not fetch deals", citations: [] as string[] })),
     ]);
 
+    // Step 2c: Fact-check launch intel
+    let launchFactCheck = null;
+    if (launchIntel) {
+      launchFactCheck = factCheckLaunchIntel(launchIntel, trimmedQuery);
+      if (launchFactCheck.warnings.length > 0) {
+        console.log(`[fact-check] ${trimmedQuery}: ${launchFactCheck.warnings.join("; ")}`);
+      }
+      // Apply adjusted confidence back to launch intel
+      launchIntel.confidence = launchFactCheck.adjustedConfidence;
+      launchIntel.summary = launchFactCheck.cleanedSummary;
+      // If unverified and low confidence, null out the upcoming product to avoid misleading users
+      if (!launchFactCheck.verified && launchFactCheck.adjustedConfidence < 0.3) {
+        console.log(`[fact-check] Suppressing unverified launch intel for "${trimmedQuery}" (confidence: ${launchFactCheck.adjustedConfidence})`);
+        launchIntel.upcomingProduct = null;
+        launchIntel.expectedDate = null;
+        launchIntel.summary = "No reliable information about upcoming product launches found.";
+      }
+    }
+
     // Step 3: Get Amazon price history (Keepa) — if we can find an ASIN
     // For MVP, we skip Keepa if no key configured
     // TODO: Extract ASIN from Amazon URL or Keepa search
@@ -384,6 +404,8 @@ productRoutes.post("/search", async (c) => {
             upcomingProduct: launchIntel.upcomingProduct,
             expectedDate: launchIntel.expectedDate,
             summary: launchIntel.summary,
+            verified: launchFactCheck?.verified ?? false,
+            citationQuality: launchFactCheck?.citationQuality ?? "none",
           }
         : null,
       nextSale: nextSale
