@@ -7,7 +7,9 @@
 import { RegionConfig, getRegionConfig, formatPrice } from "../data/region-config.js";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const MODEL = "gemini-2.0-flash-lite";
+// gemini-2.0-flash-lite was retired by Google (404s since mid-2026);
+// 3.5-flash-lite is the direct replacement recommended by the API error.
+const MODEL = "gemini-3.5-flash-lite";
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
 export interface VerdictInput {
