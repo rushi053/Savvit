@@ -11,6 +11,170 @@ import { RegionConfig, getRegionConfig, getRetailerSearchUrl, isTrustedRetailer,
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY || "";
 const SONAR_MODEL = "sonar";
 
+// ── Perplexity client (Agent API with legacy Sonar fallback) ────────
+// The legacy Chat Completions ("Sonar") API is deprecated and shuts down
+// on September 27, 2026. We call the new Agent API (/v1/agent) first and
+// fall back to the legacy endpoint if it fails, so verdicts keep working
+// during the transition either way.
+// Note: the Agent API does not return image results, so productImage is
+// only available on the legacy path (Keepa can replace this later).
+
+const AGENT_API_URL = "https://api.perplexity.ai/v1/agent";
+const LEGACY_API_URL = "https://api.perplexity.ai/chat/completions";
+const AGENT_MODEL = "perplexity/sonar";
+
+interface SonarImage {
+  image_url: string;
+  origin_url?: string;
+  title?: string;
+}
+
+interface SonarResult {
+  content: string;
+  citations: string[];
+  images: SonarImage[];
+}
+
+// If the Agent API rejects us with a client error (bad auth/schema), it
+// won't fix itself — skip it for a while instead of paying a failed
+// round-trip on every request.
+let agentApiDisabledUntil = 0;
+const AGENT_API_BACKOFF_MS = 30 * 60 * 1000;
+
+function timeoutSignal(timeoutMs?: number): { signal?: AbortSignal; cancel: () => void } {
+  if (!timeoutMs) return { signal: undefined, cancel: () => {} };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return { signal: controller.signal, cancel: () => clearTimeout(timer) };
+}
+
+export async function sonarSearch(opts: {
+  system: string;
+  user: string;
+  wantImages?: boolean;
+  label: string;
+  timeoutMs?: number;
+}): Promise<SonarResult> {
+  const { system, user, wantImages = false, label, timeoutMs } = opts;
+
+  if (Date.now() >= agentApiDisabledUntil) {
+    try {
+      const result = await callAgentApi(system, user, timeoutMs);
+      console.log(`[perplexity:${label}] via Agent API`);
+      return result;
+    } catch (e) {
+      const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      console.error(`[perplexity:${label}] Agent API failed (${msg}) — falling back to legacy Sonar`);
+      if (/status 4\d\d/.test(msg)) {
+        agentApiDisabledUntil = Date.now() + AGENT_API_BACKOFF_MS;
+      }
+    }
+  }
+
+  return callLegacyApi(system, user, wantImages, timeoutMs);
+}
+
+async function callAgentApi(system: string, user: string, timeoutMs?: number): Promise<SonarResult> {
+  const { signal, cancel } = timeoutSignal(timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(AGENT_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: AGENT_MODEL,
+        instructions: system,
+        input: [{ type: "message", role: "user", content: user }],
+        tools: [{ type: "web_search" }],
+        temperature: 0.1,
+      }),
+      signal,
+    });
+  } finally {
+    cancel();
+  }
+
+  if (!response.ok) {
+    throw new Error(`Agent API error: status ${response.status}`);
+  }
+
+  const data = await response.json();
+
+  // Prefer the convenience field; otherwise assemble text from output items.
+  let content: string = typeof data.output_text === "string" ? data.output_text : "";
+  const citations: string[] = [];
+  const textParts: string[] = [];
+
+  const output = Array.isArray(data.output) ? data.output : [];
+  for (const item of output) {
+    if (item?.type === "message" && Array.isArray(item.content)) {
+      for (const part of item.content) {
+        if (typeof part === "string") textParts.push(part);
+        else if (part && typeof part.text === "string") textParts.push(part.text);
+      }
+    }
+    // Web search sources arrive as their own output item with a results array
+    const results = Array.isArray(item?.results) ? item.results : [];
+    for (const r of results) {
+      if (r && typeof r.url === "string") citations.push(r.url);
+    }
+  }
+
+  if (!content) content = textParts.join("");
+  if (!content) {
+    throw new Error("Agent API returned empty content");
+  }
+
+  return { content, citations, images: [] };
+}
+
+async function callLegacyApi(
+  system: string,
+  user: string,
+  wantImages: boolean,
+  timeoutMs?: number
+): Promise<SonarResult> {
+  const body: Record<string, unknown> = {
+    model: SONAR_MODEL,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    temperature: 0.1,
+  };
+  if (wantImages) body.return_images = true;
+
+  const { signal, cancel } = timeoutSignal(timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(LEGACY_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } finally {
+    cancel();
+  }
+
+  if (!response.ok) {
+    throw new Error(`Perplexity API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return {
+    content: data.choices?.[0]?.message?.content || "",
+    citations: data.citations || [],
+    images: data.images || [],
+  };
+}
+
 interface PriceResult {
   retailer: string;
   price: number;
@@ -318,32 +482,12 @@ Rules:
     userMessage = `Find the current ${regionConfig.currency} price of "${query}" as sold in ${regionConfig.name}. Check EACH ${regionConfig.name} retailer individually: ${retailerDomains}. Report prices in ${regionConfig.currency} only. Include any ongoing offers or discounts.`;
   }
 
-  const response = await fetch("https://api.perplexity.ai/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: SONAR_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      temperature: 0.1,
-      return_images: true,
-    }),
+  const { content, citations, images } = await sonarSearch({
+    system: systemPrompt,
+    user: userMessage,
+    wantImages: true,
+    label: "prices",
   });
-
-  if (!response.ok) {
-    throw new Error(`Perplexity API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content || "";
-  const citations = data.citations || [];
-
-  const images: Array<{ image_url: string; origin_url?: string; title?: string }> = data.images || [];
   const productImage = pickBestProductImage(images);
 
   const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -504,37 +648,14 @@ DEAL RULES:
     userMessage = `Find current ${regionConfig.currency} prices AND active deals/coupons for "${query}" in ${regionConfig.name}. Check each retailer: ${retailerDomains}. Report prices in ${regionConfig.currency} only.`;
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
-
   try {
-    const response = await fetch("https://api.perplexity.ai/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: SONAR_MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ],
-        temperature: 0.1,
-        return_images: true,
-      }),
-      signal: controller.signal,
+    const { content, citations, images } = await sonarSearch({
+      system: systemPrompt,
+      user: userMessage,
+      wantImages: true,
+      label: "combined",
+      timeoutMs: 15000,
     });
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      throw new Error(`Perplexity API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "";
-    const citations = data.citations || [];
-    const images = data.images || [];
     const productImage = pickBestProductImage(images);
 
     const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -656,7 +777,6 @@ DEAL RULES:
 
     return { priceSearch, dealsResult };
   } catch (err: any) {
-    clearTimeout(timeout);
     if (err.name === "AbortError") {
       throw new Error("Price search timed out after 15 seconds. Try a more specific query.");
     }
@@ -714,29 +834,11 @@ Rules:
 
   const userMessage = `Find all active coupons, promo codes, bank offers, cashback deals, exchange offers, and discounts for "${query}" in ${regionConfig.name}. Check all major retailers: ${regionConfig.retailers.join(", ")}. Include any active sale events.`;
 
-  const response = await fetch("https://api.perplexity.ai/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: SONAR_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      temperature: 0.1,
-    }),
+  const { content, citations } = await sonarSearch({
+    system: systemPrompt,
+    user: userMessage,
+    label: "deals",
   });
-
-  if (!response.ok) {
-    throw new Error(`Perplexity API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content || "";
-  const citations = data.citations || [];
 
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
@@ -791,34 +893,13 @@ Rules:
 
   const userMessage = `Is there an upcoming new version of "${productName}" (category: ${category}) expected to launch soon? What are the latest rumors and expected dates?`;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout (launch intel is less critical)
-
-  const response = await fetch("https://api.perplexity.ai/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: SONAR_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      temperature: 0.1,
-    }),
-    signal: controller.signal,
+  // 10s timeout per attempt (launch intel is less critical)
+  const { content, citations } = await sonarSearch({
+    system: systemPrompt,
+    user: userMessage,
+    label: "launch",
+    timeoutMs: 10000,
   });
-  clearTimeout(timeout);
-
-  if (!response.ok) {
-    throw new Error(`Perplexity API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content || "";
-  const citations = data.citations || [];
 
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {

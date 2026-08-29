@@ -4,7 +4,7 @@
  */
 
 import { Hono } from "hono";
-import { searchPricesAndDeals, searchLaunchIntel } from "../services/perplexity.js";
+import { searchPricesAndDeals, searchLaunchIntel, sonarSearch } from "../services/perplexity.js";
 import { getAmazonPriceHistory } from "../services/keepa.js";
 import { generateVerdict, VerdictInput } from "../services/gemini.js";
 import { getNextSaleEvent } from "../data/sale-calendar.js";
@@ -138,34 +138,17 @@ async function resolveProductUrl(url: string): Promise<string> {
   }
 
   // Step 3: Fallback — ask Perplexity (may or may not work)
-  const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY || "";
   try {
-    const response = await fetch("https://api.perplexity.ai/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "sonar",
-        messages: [
-          {
-            role: "system",
-            content: `You are a product identifier. Given a product URL, return ONLY the exact product name. Nothing else — no explanation, no markdown, no quotes.`,
-          },
-          { role: "user", content: `What product is this? ${finalUrl}` },
-        ],
-        temperature: 0.1,
-      }),
+    const { content } = await sonarSearch({
+      system: `You are a product identifier. Given a product URL, return ONLY the exact product name. Nothing else — no explanation, no markdown, no quotes.`,
+      user: `What product is this? ${finalUrl}`,
+      label: "url-resolve",
     });
-
-    if (response.ok) {
-      const data = await response.json();
-      const name = data.choices?.[0]?.message?.content?.trim();
-      if (name && name.length > 3 && name.length < 200 && !name.includes("don't have") && !name.includes("cannot")) {
-        console.log(`[URL resolve] Perplexity: "${name}"`);
-        return name;
-      }
+    // Strip inline citation markers like [1] that grounded models may add
+    const name = content.replace(/\[\d+\]/g, "").trim();
+    if (name && name.length > 3 && name.length < 200 && !name.includes("don't have") && !name.includes("cannot")) {
+      console.log(`[URL resolve] Perplexity: "${name}"`);
+      return name;
     }
   } catch {
     // Perplexity failed — last resort below
