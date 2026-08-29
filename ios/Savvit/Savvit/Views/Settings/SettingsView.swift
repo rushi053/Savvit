@@ -6,8 +6,6 @@ struct SettingsView: View {
     @State private var showNotificationsComingSoon = false
     @AppStorage("darkMode") private var darkMode = false
     @AppStorage("selectedRegion") private var selectedRegion = ""
-    @State private var showProComingSoon = false
-    @State private var showRestoreAlert = false
     @State private var showPrivacyPolicy = false
 
     var body: some View {
@@ -21,14 +19,11 @@ struct SettingsView: View {
                         .padding(.top, 60)
                         .padding(.bottom, Theme.spacingXXL)
 
-                    proUpgradeCard
-                        .padding(.bottom, 28)
-
                     sectionHeader("PREFERENCES")
 
                     VStack(spacing: 0) {
                         Button { showNotificationsComingSoon = true } label: {
-                            settingNav(icon: "bell.fill", label: "Notifications", trailing: "Coming with Pro")
+                            settingNav(icon: "bell.fill", label: "Notifications", trailing: "Coming Soon")
                         }
                         .buttonStyle(.plain)
                         sectionDivider
@@ -104,79 +99,11 @@ struct SettingsView: View {
                 SafariView(url: URL(string: "https://savvit.app/privacy")!)
                     .ignoresSafeArea()
             }
-        }
-    }
-
-    // MARK: - Pro Upgrade
-
-    private var proUpgradeCard: some View {
-        VStack(spacing: Theme.spacingLG) {
-            HStack(spacing: Theme.spacingMD) {
-                RoundedRectangle(cornerRadius: Theme.cornerRadiusMD)
-                    .fill(Theme.savvitLime.opacity(0.12))
-                    .frame(width: 48, height: 48)
-                    .overlay(
-                        Image(systemName: "crown.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(Theme.savvitLime)
-                    )
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Upgrade to Pro")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Text("AI predictions, unlimited searches & more")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.5))
-                }
+            .alert("Coming Soon", isPresented: $showNotificationsComingSoon) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Push notifications and price drop alerts are coming soon.")
             }
-
-            Button {
-                Analytics.track("pro_tapped", properties: ["context": "settings"])
-                showProComingSoon = true
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                    Text(settingsProPrice)
-                }
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Theme.textOnLime)
-                .frame(maxWidth: .infinity)
-                .frame(height: 44)
-                .background(Theme.savvitLime)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
-            }
-
-            Button { showRestoreAlert = true } label: {
-                Text("Restore Purchases")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .padding(Theme.spacingXL)
-        .background(
-            LinearGradient(
-                colors: [Color(hex: "1C1C1E"), Color(hex: "2C2C2E")],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .alert("Coming Soon", isPresented: $showProComingSoon) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Savvit Pro is coming soon! We'll notify you when it's ready.")
-        }
-        .alert("Coming Soon", isPresented: $showNotificationsComingSoon) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Push notifications and price drop alerts are coming with Savvit Pro.")
-        }
-        .alert("Restore Purchases", isPresented: $showRestoreAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("No previous purchases found.")
         }
     }
 
@@ -280,13 +207,6 @@ struct SettingsView: View {
                     "JP": "Japan", "FR": "France"]
         if selectedRegion.isEmpty { return "Auto" }
         return map[selectedRegion] ?? selectedRegion
-    }
-
-    private var settingsProPrice: String {
-        let region = selectedRegion.isEmpty
-            ? (Locale.current.region?.identifier ?? "US")
-            : selectedRegion
-        return region == "IN" ? "₹79/mo" : "$4.99/mo"
     }
 
     // MARK: - Actions

@@ -1,5 +1,4 @@
 import SwiftUI
-import StoreKit
 
 struct VerdictDetailView: View {
     let result: ProductSearchResult
@@ -8,7 +7,6 @@ struct VerdictDetailView: View {
     @AppStorage("selectedRegion") private var selectedRegion = ""
     @State private var showContent = false
     @State private var showProUpgrade = false
-    @State private var showProComingSoon = false
     @State private var copiedDealId: String?
 
     var body: some View {
@@ -503,73 +501,33 @@ struct VerdictDetailView: View {
         }
     }
 
-    // MARK: - Pro Insight
+    // MARK: - AI Insight
 
     private var proInsightCard: some View {
         VStack(spacing: Theme.spacingLG) {
-            HStack {
-                HStack(spacing: Theme.spacingSM) {
-                    Image(systemName: "crown.fill")
-                        .foregroundStyle(Theme.savvitLime)
-                    Text("Pro Insight")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                Spacer()
-                Text("PRO")
-                    .font(.system(size: 10, weight: .bold))
-                    .tracking(0.5)
+            HStack(spacing: Theme.spacingSM) {
+                Image(systemName: "brain.head.profile")
                     .foregroundStyle(Theme.savvitLime)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Theme.savvitLime.opacity(0.12))
-                    .clipShape(Capsule())
+                Text("AI Insight")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
             }
 
-            ZStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    if let analysis = result.proAnalysis {
-                        Text(analysis.bestCurrentDeal ?? "Detailed price analysis available.")
-                        Text(analysis.waitReason ?? "Price prediction and timing.")
-                        Text("Best time: \(analysis.bestTimeToBuy ?? "See full analysis")")
+            if let analysis = result.proAnalysis {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let deal = analysis.bestCurrentDeal {
+                        Label(deal, systemImage: "tag.fill")
+                    }
+                    if let wait = analysis.waitReason {
+                        Label(wait, systemImage: "calendar")
+                    }
+                    if let time = analysis.bestTimeToBuy {
+                        Label("Best time: \(time)", systemImage: "clock")
                     }
                 }
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.3))
-                .blur(radius: 5)
+                .foregroundStyle(.white.opacity(0.9))
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-                VStack(spacing: Theme.spacingMD) {
-                    RoundedRectangle(cornerRadius: Theme.cornerRadiusMD)
-                        .fill(Color.white.opacity(0.1))
-                        .frame(width: 48, height: 48)
-                        .overlay(
-                            Image(systemName: "lock.fill")
-                                .font(.system(size: 22))
-                                .foregroundStyle(Theme.savvitLime)
-                        )
-
-                    Text("Unlock Pro Insights")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-            }
-
-            Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                Analytics.track("pro_tapped", properties: ["product": result.product, "context": "verdict_detail"])
-                showProComingSoon = true
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                    Text("Unlock Pro — \(proPriceLabel)")
-                }
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Theme.textOnLime)
-                .frame(maxWidth: .infinity)
-                .frame(height: Theme.buttonHeight)
-                .background(Theme.savvitLime)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
             }
         }
         .padding(Theme.spacingXL)
@@ -581,11 +539,6 @@ struct VerdictDetailView: View {
             )
         )
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .alert("Coming Soon", isPresented: $showProComingSoon) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Savvit Pro is coming soon! We'll notify you when it's ready.")
-        }
     }
 
     // MARK: - Watchlist Button
@@ -701,10 +654,6 @@ struct VerdictDetailView: View {
         ]
         let pair = map[resolvedRegionCode] ?? ("USD", "$")
         return (pair.0, pair.1)
-    }
-
-    private var proPriceLabel: String {
-        resolvedRegionCode == "IN" ? "₹79/mo" : "$4.99/mo"
     }
 
     private func buildSaleDescription(_ sale: SaleEvent) -> String {
