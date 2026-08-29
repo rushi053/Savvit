@@ -40,6 +40,23 @@ struct WatchlistCard: View {
                             .foregroundStyle(Theme.textPrimary)
                     }
 
+                    if let drop = item.priceDropAmount {
+                        HStack(spacing: 2) {
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 9, weight: .bold))
+                            Text(drop.formattedPrice(
+                                currency: regionCurrency.code,
+                                symbol: regionCurrency.symbol
+                            ))
+                            .font(.system(size: 11, weight: .bold))
+                        }
+                        .foregroundStyle(Theme.verdictBuyText)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Theme.verdictBuyBg)
+                        .clipShape(Capsule())
+                    }
+
                     Text(verdictLabel)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Theme.textOnLime)

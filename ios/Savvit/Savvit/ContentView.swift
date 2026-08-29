@@ -4,7 +4,8 @@ struct ContentView: View {
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("darkMode") private var darkMode = false
     @State private var selectedTab = 0
-    @State private var watchlistVM = WatchlistViewModel()
+    // Shared with the background-refresh task so both see the same data
+    @State private var watchlistVM = WatchlistViewModel.shared
     @Namespace private var tabAnimation
 
     init() {

@@ -41,6 +41,19 @@ final class APIClient: Sendable {
         authTokenStore.get()
     }
 
+    // MARK: - Pre-warm
+
+    /// Fire-and-forget ping so the free-tier backend spins up before the
+    /// user's first search instead of during it.
+    func prewarm() {
+        guard let url = URL(string: "\(Constants.apiBaseURL)/health") else { return }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 45
+        Task.detached(priority: .utility) {
+            _ = try? await URLSession.shared.data(for: request)
+        }
+    }
+
     // MARK: - Product Search (no auth needed)
 
     func searchProduct(query: String, sourceUrl: String? = nil) async throws -> ProductSearchResult {

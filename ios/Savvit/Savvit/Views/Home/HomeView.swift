@@ -5,6 +5,13 @@ struct HomeView: View {
     @Environment(WatchlistViewModel.self) private var watchlist
     @State private var itemToDelete: LocalWatchlistItem?
     @AppStorage("watchlistBannerDismissed") private var bannerDismissed = false
+    @State private var showPaywall = false
+    @State private var alertsEnabled = AlertsManager.alertsEnabled
+    private var pro = ProManager.shared
+
+    init(selectedTab: Binding<Int>) {
+        _selectedTab = selectedTab
+    }
 
     var body: some View {
         NavigationStack {
@@ -88,6 +95,20 @@ struct HomeView: View {
                     Text("\(watchlist.itemCount) product\(watchlist.itemCount != 1 ? "s" : "") tracked")
                         .font(.system(size: 15))
                         .foregroundStyle(Theme.textSecondary)
+
+                    if watchlist.isRefreshing {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.mini)
+                            Text("Checking latest prices…")
+                        }
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textTertiary)
+                    } else if let refreshed = watchlist.lastRefreshAt {
+                        Text("Prices checked \(refreshed, format: .relative(presentation: .named))")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
                 }
                 .padding(.top, 60)
                 .padding(.bottom, Theme.spacingXL)
@@ -108,8 +129,8 @@ struct HomeView: View {
                 }
                 .padding(.bottom, Theme.spacingXL)
 
-                if !bannerDismissed {
-                    comingSoonBanner
+                if showAlertsBanner {
+                    alertsBanner
                         .padding(.bottom, Theme.spacingMD)
                 }
 
@@ -131,7 +152,10 @@ struct HomeView: View {
         }
         .refreshable {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            try? await Task.sleep(for: .milliseconds(500))
+            await watchlist.refreshPrices(force: true)
+        }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(context: "watchlist_banner")
         }
         .alert("Remove from Watchlist?", isPresented: .init(
             get: { itemToDelete != nil },
@@ -149,37 +173,73 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Coming Soon Banner
+    // MARK: - Alerts Banner
 
-    private var comingSoonBanner: some View {
+    private var showAlertsBanner: Bool {
+        if pro.isPro {
+            return !alertsEnabled // Pro but alerts off → offer to enable
+        }
+        return !bannerDismissed // Free → pitch Pro (dismissible)
+    }
+
+    private var alertsBanner: some View {
         HStack(alignment: .top, spacing: Theme.spacingMD) {
-            Image(systemName: "chart.line.uptrend.xyaxis")
+            Image(systemName: "bell.badge.fill")
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.savvitLime)
                 .frame(width: 32, height: 32)
                 .background(Theme.savvitBlue)
                 .clipShape(Circle())
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Price Tracking & Alerts")
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Price-Drop Alerts")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
 
-                Text("Get notified when prices drop on your saved items. Coming soon with Savvit Pro.")
+                Text(pro.isPro
+                     ? "Turn on notifications and we'll watch these prices for you."
+                     : "Get notified when prices drop on your saved items — with Savvit Pro.")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textSecondary)
                     .lineSpacing(2)
+
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    if pro.isPro {
+                        Task {
+                            if await AlertsManager.requestPermission() {
+                                AlertsManager.alertsEnabled = true
+                                withAnimation(Theme.snappy) { alertsEnabled = true }
+                                AlertsManager.scheduleBackgroundRefresh()
+                                Analytics.track("alerts_enabled", properties: ["context": "banner"])
+                            }
+                        }
+                    } else {
+                        showPaywall = true
+                    }
+                } label: {
+                    Text(pro.isPro ? "Enable Alerts" : "Unlock with Pro")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.textOnLime)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Theme.savvitLime)
+                        .clipShape(Capsule())
+                }
+                .padding(.top, 2)
             }
 
             Spacer(minLength: 0)
 
-            Button {
-                withAnimation(Theme.snappy) { bannerDismissed = true }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.textTertiary)
-                    .frame(width: 24, height: 24)
+            if !pro.isPro {
+                Button {
+                    withAnimation(Theme.snappy) { bannerDismissed = true }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(width: 24, height: 24)
+                }
             }
         }
         .padding(Theme.spacingLG)

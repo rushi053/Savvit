@@ -3,10 +3,14 @@ import SafariServices
 import StoreKit
 
 struct SettingsView: View {
-    @State private var showNotificationsComingSoon = false
     @AppStorage("darkMode") private var darkMode = false
     @AppStorage("selectedRegion") private var selectedRegion = ""
     @State private var showPrivacyPolicy = false
+    @State private var showPaywall = false
+    @State private var showManageSubscriptions = false
+    @State private var showRestoreResult = false
+    @State private var alertsEnabled = AlertsManager.alertsEnabled
+    private var pro = ProManager.shared
 
     var body: some View {
         NavigationStack {
@@ -19,13 +23,57 @@ struct SettingsView: View {
                         .padding(.top, 60)
                         .padding(.bottom, Theme.spacingXXL)
 
+                    sectionHeader("SAVVIT PRO")
+
+                    VStack(spacing: 0) {
+                        if pro.isPro {
+                            settingValue(icon: "crown.fill", label: "Savvit Pro", value: "Active")
+                            sectionDivider
+                            Button { showManageSubscriptions = true } label: {
+                                settingNav(icon: "creditcard.fill", label: "Manage Subscription")
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            Button { showPaywall = true } label: {
+                                settingNav(icon: "crown.fill", label: "Upgrade to Pro", trailing: "Alerts & unlimited tracking")
+                            }
+                            .buttonStyle(.plain)
+                            sectionDivider
+                            Button {
+                                Task {
+                                    await pro.restorePurchases()
+                                    showRestoreResult = true
+                                }
+                            } label: {
+                                settingNav(icon: "arrow.clockwise", label: "Restore Purchases")
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .background(Theme.bgPrimary)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.cornerRadiusMD)
+                            .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                    )
+                    .padding(.bottom, 28)
+
                     sectionHeader("PREFERENCES")
 
                     VStack(spacing: 0) {
-                        Button { showNotificationsComingSoon = true } label: {
-                            settingNav(icon: "bell.fill", label: "Notifications", trailing: "Coming Soon")
+                        if pro.isPro {
+                            settingToggle(
+                                icon: "bell.fill",
+                                label: "Price-Drop Alerts",
+                                subtitle: "Notify me when watched prices fall",
+                                isOn: alertsToggleBinding
+                            )
+                        } else {
+                            Button { showPaywall = true } label: {
+                                settingNav(icon: "bell.fill", label: "Price-Drop Alerts", trailing: "Pro")
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                         sectionDivider
                         settingToggle(icon: "moon.fill", label: "Dark Mode", isOn: $darkMode)
                         sectionDivider
@@ -78,7 +126,7 @@ struct SettingsView: View {
                     .padding(.bottom, Theme.spacingXXL)
 
                     VStack(spacing: 2) {
-                        Text("Savvit v1.0.0")
+                        Text("Savvit v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
                             .font(.system(size: 12))
                         Text("Made with care for smart shoppers")
                             .font(.system(size: 11))
@@ -99,12 +147,43 @@ struct SettingsView: View {
                 SafariView(url: URL(string: "https://savvit.app/privacy")!)
                     .ignoresSafeArea()
             }
-            .alert("Coming Soon", isPresented: $showNotificationsComingSoon) {
+            .sheet(isPresented: $showPaywall) {
+                PaywallView(context: "settings")
+            }
+            .manageSubscriptionsSheet(isPresented: $showManageSubscriptions)
+            .alert("Restore Purchases", isPresented: $showRestoreResult) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text("Push notifications and price drop alerts are coming soon.")
+                Text(pro.isPro
+                     ? "Your Savvit Pro subscription has been restored."
+                     : "No active subscription found for this Apple ID.")
             }
         }
+    }
+
+    // MARK: - Alerts toggle
+
+    private var alertsToggleBinding: Binding<Bool> {
+        Binding(
+            get: { alertsEnabled },
+            set: { newValue in
+                if newValue {
+                    Task {
+                        let granted = await AlertsManager.requestPermission()
+                        AlertsManager.alertsEnabled = granted
+                        alertsEnabled = granted
+                        if granted {
+                            AlertsManager.scheduleBackgroundRefresh()
+                            Analytics.track("alerts_enabled", properties: ["context": "settings"])
+                        }
+                    }
+                } else {
+                    AlertsManager.alertsEnabled = false
+                    alertsEnabled = false
+                    Analytics.track("alerts_disabled")
+                }
+            }
+        )
     }
 
     // MARK: - Section Components

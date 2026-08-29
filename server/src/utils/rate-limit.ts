@@ -24,8 +24,11 @@ export interface RateLimitConfig {
 }
 
 export const RATE_LIMITS = {
-  ANONYMOUS: { windowMs: 60 * 60 * 1000, maxRequests: 10 },     // 10/hour
-  AUTHENTICATED: { windowMs: 60 * 60 * 1000, maxRequests: 30 }, // 30/hour
+  // 25/hour: leaves headroom for the iOS watchlist auto-refresh (up to 6
+  // requests per pass) on top of manual searches. Most refreshes hit the
+  // server-side price cache, so the real API cost stays low.
+  ANONYMOUS: { windowMs: 60 * 60 * 1000, maxRequests: 25 },     // 25/hour
+  AUTHENTICATED: { windowMs: 60 * 60 * 1000, maxRequests: 40 }, // 40/hour
   PRO: { windowMs: 60 * 60 * 1000, maxRequests: 100 },          // 100/hour
 };
 

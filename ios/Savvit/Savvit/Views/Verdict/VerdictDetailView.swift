@@ -559,11 +559,11 @@ struct VerdictDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadiusMD))
             } else {
                 Button {
-                    if watchlist.isAtFreeLimit {
-                        showProUpgrade = true
-                    } else {
+                    if watchlist.canAddMore {
                         watchlist.addItem(from: result)
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } else {
+                        showProUpgrade = true
                     }
                 } label: {
                     HStack(spacing: 10) {
@@ -580,10 +580,8 @@ struct VerdictDetailView: View {
                 }
             }
         }
-        .alert("Watchlist Full", isPresented: $showProUpgrade) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("You're tracking \(Constants.freeWatchlistLimit) items — that's the free limit. Savvit Pro (coming soon) will unlock unlimited tracking.")
+        .sheet(isPresented: $showProUpgrade) {
+            PaywallView(context: "watchlist_limit")
         }
     }
 
