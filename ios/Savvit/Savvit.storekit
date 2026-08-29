@@ -1,5 +1,5 @@
 {
-  "identifier" : "5D2C1A7E-0000-4000-8000-SAVVITSTORE1",
+  "identifier" : "3F2B8A1C-9D4E-4B7A-A1E2-6C5D8F9B0A31",
   "nonRenewingSubscriptions" : [
 
   ],
@@ -7,19 +7,60 @@
 
   ],
   "settings" : {
-    "_applicationInternalID" : "0",
-    "_developerTeamID" : "",
     "_failTransactionsEnabled" : false,
-    "_lastSynchronizedDate" : 0,
     "_locale" : "en_US",
     "_storefront" : "USA",
     "_storeKitErrors" : [
-
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
     ]
   },
   "subscriptionGroups" : [
     {
-      "id" : "SAVVITPROGROUP1",
+      "id" : "8E1A4C2B-5F6D-4E3A-9B8C-7D2E1F0A5B64",
       "localizations" : [
 
       ],
@@ -35,9 +76,10 @@
           "displayPrice" : "1.99",
           "familyShareable" : false,
           "groupNumber" : 1,
-          "internalID" : "SAVVITPROMONTHLY",
+          "internalID" : "1C7E9A3B-2D4F-4A6C-8B1E-0F5A7D9C3E82",
           "introductoryOffer" : {
-            "internalID" : "SAVVITPROTRIALM",
+            "internalID" : "4B8D2F6A-1E3C-4D5B-A7F9-2C0E8B6D4A17",
+            "numberOfPeriods" : 1,
             "paymentMode" : "free",
             "subscriptionPeriod" : "P1W"
           },
@@ -51,7 +93,7 @@
           "productID" : "app.savvit.pro.monthly",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Savvit Pro Monthly",
-          "subscriptionGroupID" : "SAVVITPROGROUP1",
+          "subscriptionGroupID" : "8E1A4C2B-5F6D-4E3A-9B8C-7D2E1F0A5B64",
           "type" : "RecurringSubscription"
         },
         {
@@ -64,9 +106,10 @@
           "displayPrice" : "14.99",
           "familyShareable" : false,
           "groupNumber" : 1,
-          "internalID" : "SAVVITPROYEARLY",
+          "internalID" : "9A3C5E7B-4D2F-4B8A-C1E6-3F0B9D7A5C28",
           "introductoryOffer" : {
-            "internalID" : "SAVVITPROTRIALY",
+            "internalID" : "6D0F4B8C-3E5A-4C7D-B9E1-4A2C0F8B6D39",
+            "numberOfPeriods" : 1,
             "paymentMode" : "free",
             "subscriptionPeriod" : "P1W"
           },
@@ -80,7 +123,7 @@
           "productID" : "app.savvit.pro.yearly",
           "recurringSubscriptionPeriod" : "P1Y",
           "referenceName" : "Savvit Pro Yearly",
-          "subscriptionGroupID" : "SAVVITPROGROUP1",
+          "subscriptionGroupID" : "8E1A4C2B-5F6D-4E3A-9B8C-7D2E1F0A5B64",
           "type" : "RecurringSubscription"
         }
       ]

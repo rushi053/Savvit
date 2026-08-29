@@ -43,8 +43,16 @@ final class ProManager {
             let loaded = try await Product.products(for: Constants.proProductIDs)
             products = loaded.sorted { $0.price < $1.price }
             lastError = nil
+            if loaded.isEmpty {
+                // Not an error from StoreKit's perspective — the store just
+                // has no such products. In DEBUG that almost always means the
+                // StoreKit configuration file isn't selected in the scheme;
+                // in production it means the ASC products aren't live yet.
+                print("[ProManager] Product.products returned 0 products for \(Constants.proProductIDs). Select Savvit.storekit in Scheme ▸ Run ▸ Options, or check App Store Connect product status.")
+            }
         } catch {
             lastError = "Couldn't load plans. Check your connection and try again."
+            print("[ProManager] product load failed: \(error)")
         }
     }
 
