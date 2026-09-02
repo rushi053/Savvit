@@ -1,0 +1,21 @@
+---
+description: Savvit — iOS "buy now or wait?" AI price-verdict app + Hono backend on Render (Stream C). Repo facts and conventions; HQ at ~/Desktop/hq
+alwaysApply: true
+---
+
+# Savvit (Stream C)
+
+Business context and protocols: `/Users/rushiraj/Desktop/hq/` — read `CONTEXT.md`, `LOG.md`, `BACKLOG.md`, `PLAYBOOK.md` first.
+
+## Facts
+- Monorepo: `ios/` (SwiftUI app, `Savvit.xcodeproj`, `Savvit.storekit`), `server/` (Hono + TypeScript, deployed on Render — $7/mo compute since 2026-09-02), `docs/` (spec). GitHub `rushi053/Savvit`, branch `main`.
+- Backend calls paid third-party APIs per verdict (Perplexity Sonar, Keepa, Gemini Flash Lite per README) + Supabase. Every free verdict has a real marginal cost — keep this in mind for free-tier limits and pricing.
+- App Store: v1.0 live free since 2026-02-26 (0 ratings). **v1.1.0 with Savvit Pro (StoreKit 2 direct: $1.99/mo, $14.99/yr) submitted to App Review 2026-09-02.** Site: savvit.app (Vercel project `savvit-website`).
+- Pro logic: `ios/Savvit/Savvit/Services/ProManager.swift`; constants in `Utils/Constants.swift`. README's "RevenueCat, PostHog" stack line predates the StoreKit 2 implementation — verify against code, not README.
+- Render review trigger: if Savvit revenue < $7/mo within ~60 days of v1.1.0 approval, downgrade or migrate `server/` to Vercel serverless (see hq/LOG 2026-09-02).
+
+## Conventions
+- iOS entitlement logic: derive from `Transaction.currentEntitlements`; never grant blindly on a transaction.
+- Backend changes: mind per-request API cost; add rate limits before widening any free path.
+- App Store submissions and Render dashboard actions are Rushiraj's; prepare exact steps.
+- Never read `.env*` (server and iOS).
