@@ -12,6 +12,7 @@
 
 /* Begin PBXFileReference section */
 		255082332F45CBA400B53CFC /* Savvit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Savvit.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20913B93048339F00F44338 /* Savvit.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Savvit.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -50,6 +51,7 @@
 		2550822A2F45CBA300B53CFC = {
 			isa = PBXGroup;
 			children = (
+				B20913B93048339F00F44338 /* Savvit.storekit */,
 				255082352F45CBA400B53CFC /* Savvit */,
 				255082342F45CBA400B53CFC /* Products */,
 			);
